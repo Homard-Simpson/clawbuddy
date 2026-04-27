@@ -1,28 +1,28 @@
 # ClawBuddy Bridge
 
-This folder will hold the standalone ClawBuddy bridge. It should borrow from the live Xiaozhi/OpenClaw bridge by copying known-good ideas, not by importing or mutating the live runtime.
+This folder will hold the standalone ClawBuddy bridge. It should borrow from the live prototype/OpenClaw bridge by copying known-good ideas, not by importing or mutating the live runtime.
 
 ## Reference pieces to fork carefully
 
-- `xiaozhi-bridge/bridge/openclaw_openai_bridge.py`
+- `prototype bridge OpenAI-compatible relay`
   - OpenAI-compatible local relay into OpenClaw.
   - Keep `/health`.
   - Keep short voice-safe timeout.
   - Replace live fixed session with ClawBuddy device/session identity.
 
-- `scripts/xiaozhi_self_tools_ws_bridge.py`
+- `prototype self-tools WebSocket bridge`
   - Stdio ⇄ WebSocket MCP bridge.
   - Preserve newline-delimited JSON-RPC framing.
   - Improve child lifecycle ownership so orphan self-tool servers do not accumulate.
 
-- `scripts/xiaozhi_stack_watchdog.sh`
+- `prototype watchdog`
   - Port checks, HTTP checks, WebSocket handshake, and recovery pattern.
   - Rewrite for ClawBuddy ports/labels only.
 
 ## Product bridge requirements
 
 - Local-only by default.
-- Does not bind to live Xiaozhi ports.
+- Does not bind to prototype ports.
 - Health endpoint on product status API.
 - Device/session identity is explicit.
 - Long jobs should return quickly and continue in OpenClaw sessions/subagents.

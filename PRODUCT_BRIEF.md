@@ -17,7 +17,7 @@ OpenClaw is powerful but usually lives behind a phone, browser, laptop, or chat 
 
 ## Hardware requirement
 
-ClawBuddy must use the **ESP32-S3 Touch-AMOLED-1.8** as the target device. The existing Xiaozhi bridge remains a working prototype/reference only and must stay separate/usable while ClawBuddy is developed.
+ClawBuddy must use the **ESP32-S3 Touch-AMOLED-1.8** as the first target device. Inherited upstream voice-assistant code is scaffolding only; the product target is standalone ClawBuddy firmware, standalone ClawBuddy server, and OpenClaw integration.
 
 ## MVP behavior
 1. Wake/listen reliably.
@@ -30,7 +30,7 @@ ClawBuddy must use the **ESP32-S3 Touch-AMOLED-1.8** as the target device. The e
 8. Recover automatically from common failures: stuck listening, bad ASR loops, bridge restart, stale ports, Funnel route drift.
 
 ## Current prototype foundation
-- ESP/Xiaozhi-compatible device connects to a self-hosted ClawBuddy/Xiaozhi server.
+- ClawBuddy device connects to a self-hosted ClawBuddy server.
 - Public access should expose only the required device bootstrap/WebSocket paths, preferably through a managed tunnel or reverse proxy.
 - OpenClaw bridge exposes OpenAI-compatible chat endpoint locally on `:8899`.
 - ESP voice turns relay into a dedicated OpenClaw voice session.
@@ -55,7 +55,7 @@ ClawBuddy must use the **ESP32-S3 Touch-AMOLED-1.8** as the target device. The e
 - Local device controls are first-class tools.
 
 ### Edge server
-- Xiaozhi server handles device WebSocket, OTA, VAD/ASR/TTS, and device MCP tools.
+- ClawBuddy server handles device WebSocket, OTA, provisioning, VAD/ASR/TTS, and device tools.
 - Watchdog keeps ports, endpoints, and public route healthy.
 - OTA/config endpoint is auth-gated.
 
@@ -78,7 +78,7 @@ ClawBuddy must use the **ESP32-S3 Touch-AMOLED-1.8** as the target device. The e
 
 ## MVP deliverables
 1. Stable local prototype on a developer workstation or small server.
-2. Repeatable install script for Xiaozhi bridge + LaunchAgents.
+2. Repeatable install script for ClawBuddy server + service manager.
 3. Device provisioning flow with QR/manual URL.
 4. Auth-gated OTA/config endpoint.
 5. Health dashboard/status command.
@@ -94,7 +94,7 @@ ClawBuddy must use the **ESP32-S3 Touch-AMOLED-1.8** as the target device. The e
 
 ## Separation constraint
 
-ClawBuddy development lives under `products/clawbuddy/` and must not destabilize the live `xiaozhi-bridge/`. Use separate ports, LaunchAgent labels, config, OTA/provisioning paths, and public exposure rules. Borrow from Xiaozhi only by copying/reference, not by hacking the working bridge in place.
+ClawBuddy development lives under `products/clawbuddy/` and should not destabilize any existing production voice bridge. Use separate ports, service labels, config, OTA/provisioning paths, and public exposure rules. Borrow from inherited upstream code only as scaffolding, then replace it with ClawBuddy-owned components.
 
 ## Near-term engineering backlog
 - Make ESP self-tools reliably reachable from the live voice session, not just server-side.

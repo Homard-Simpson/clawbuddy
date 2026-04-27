@@ -5,11 +5,11 @@
 ClawBuddy now has a separate product folder with:
 
 - Product brief and hardware target.
-- Separation plan so the live Xiaozhi bridge stays untouched.
+- Separation plan so the live prototype bridge stays untouched.
 - Voice-input tuning profiles based on the live prototype settings that worked better.
 - Runtime example config with non-conflicting product ports.
 - Status contract for a future dashboard/CLI.
-- LaunchAgent template using `com.openclaw.clawbuddy.*`, not Xiaozhi labels.
+- LaunchAgent template using `com.openclaw.clawbuddy.*`, not prototype labels.
 
 ## Live prototype lessons captured
 
@@ -27,4 +27,4 @@ ClawBuddy now has a separate product folder with:
 ## Next implementation step
 
 Build a separate local ClawBuddy runtime on ports `8100/8103/8104/8199`, initially LAN/local-only.
-Do not point the ESP at it until `clawbuddy status` is clean and the live Xiaozhi bridge has a rollback path.
+Do not point the ESP at it until `clawbuddy status` is clean and the live prototype bridge has a rollback path.

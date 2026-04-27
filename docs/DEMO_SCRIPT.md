@@ -1,6 +1,6 @@
 # ClawBuddy Demo Script
 
-Goal: show that ClawBuddy is becoming a real product without risking the live Xiaozhi bridge.
+Goal: show that ClawBuddy is becoming a real product without risking the live prototype bridge.
 
 ## 1. Show separation
 
@@ -23,7 +23,7 @@ bin/clawbuddy status --live
 
 Expected:
 
-- live Xiaozhi ports healthy
+- live prototype ports healthy
 - Funnel `:10000` healthy
 - live audio is `16000` / `60ms`
 - live Silero profile is `0.40 / 0.20 / 900ms`
@@ -60,7 +60,7 @@ Expected:
 
 ## 5. Voice-path demo on live prototype
 
-Use the actual ESP/Xiaozhi device, not ClawBuddy runtime yet:
+Use the actual ESP voice device, not ClawBuddy runtime yet:
 
 - “Device status.”
 - “Set your text size bigger.”

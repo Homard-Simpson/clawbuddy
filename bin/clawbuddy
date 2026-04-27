@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """ClawBuddy product CLI.
 
-Safe by default: operates on products/clawbuddy config only. Live Xiaozhi
-inspection is read-only and requires --live.
+Safe by default: operates on products/clawbuddy config only. Live prototype inspection is read-only and requires --live.
 """
 from __future__ import annotations
 
@@ -57,7 +56,7 @@ def run_text(cmd: list[str]) -> str:
 
 
 def parse_live_yaml_scalar(text: str, key: str) -> str | None:
-    # Good enough for the known Xiaozhi config shape; avoids adding PyYAML dependency.
+    # Good enough for the known prototype config shape; avoids adding PyYAML dependency.
     m = re.search(rf"^\s*{re.escape(key)}:\s*([^#\n]+)", text, re.M)
     return m.group(1).strip().strip('"\'') if m else None
 
@@ -113,7 +112,7 @@ def product_status(include_live: bool = False) -> dict[str, Any]:
         serve = run_text(["tailscale", "serve", "status"])
         result["livePrototype"] = {
             "ports": {
-                "xiaozhiWebsocket8000": tcp_open("127.0.0.1", 8000),
+                "prototypeWebsocket8000": tcp_open("127.0.0.1", 8000),
                 "ota8003": tcp_open("127.0.0.1", 8003),
                 "mcp8004": tcp_open("127.0.0.1", 8004),
                 "bridge8899": tcp_open("127.0.0.1", 8899),
@@ -143,7 +142,7 @@ def print_status(data: dict[str, Any]) -> None:
         print(f"  - {name}: {check['port']} {state}")
     live = data.get("livePrototype")
     if live:
-        print("live Xiaozhi prototype (read-only):")
+        print("live prototype bridge (read-only):")
         print("  ports: " + ", ".join(f"{k}={'ok' if v else 'down'}" for k, v in live["ports"].items()))
         print("  http: " + ", ".join(f"{k}={v}" for k, v in live["http"].items()))
         print(f"  funnel10000: {'ok' if live['funnel10000'] else 'missing'}")
@@ -183,7 +182,7 @@ def cmd_tune(args: argparse.Namespace) -> int:
         print(json.dumps({"updated": str(RUNTIME_LOCAL), "profile": args.profile, "liveMutated": False}, indent=2))
     else:
         print(f"Set ClawBuddy product profile to {args.profile} in {RUNTIME_LOCAL}")
-        print("Live Xiaozhi bridge was not changed.")
+        print("Live prototype bridge was not changed.")
     return 0
 
 
@@ -210,7 +209,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("status", help="Show product runtime status")
-    sp.add_argument("--live", action="store_true", help="Read-only compare against live Xiaozhi prototype")
+    sp.add_argument("--live", action="store_true", help="Read-only compare against a live prototype bridge")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_status)
 
@@ -218,7 +217,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_profiles)
 
-    sp = sub.add_parser("tune", help="Set product voice input profile; does not touch live Xiaozhi")
+    sp = sub.add_parser("tune", help="Set product voice input profile; does not touch a live prototype bridge")
     sp.add_argument("profile", choices=sorted(profile_data().get("profiles", {}).keys()))
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_tune)
