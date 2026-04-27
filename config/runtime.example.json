@@ -1,0 +1,22 @@
+{
+  "schema": "clawbuddy.runtime.v1",
+  "profile": "forgiving",
+  "ports": {
+    "websocket": 8100,
+    "ota": 8103,
+    "mcpEndpoint": 8104,
+    "bridgeHealth": 8199
+  },
+  "launchAgentPrefix": "com.openclaw.clawbuddy",
+  "publicExposure": {
+    "enabled": false,
+    "funnelPort": null,
+    "paths": []
+  },
+  "security": {
+    "requireDeviceAllowlist": true,
+    "requireClientAllowlist": true,
+    "signedFirmwareUrls": true,
+    "publicDashboards": false
+  }
+}

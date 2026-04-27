@@ -1,0 +1,36 @@
+{
+  "schema": "clawbuddy.voiceProfiles.v1",
+  "defaultProfile": "forgiving",
+  "profiles": {
+    "strict": {
+      "description": "Noisy rooms; avoids accidental wake/listen but may cut off soft speech.",
+      "silero": {
+        "threshold": 0.50,
+        "threshold_low": 0.30,
+        "min_silence_duration_ms": 500
+      }
+    },
+    "normal": {
+      "description": "Balanced default for most rooms.",
+      "silero": {
+        "threshold": 0.45,
+        "threshold_low": 0.25,
+        "min_silence_duration_ms": 700
+      }
+    },
+    "forgiving": {
+      "description": "More leeway for pauses and softer speech. Useful for quiet rooms or soft-spoken users.",
+      "silero": {
+        "threshold": 0.40,
+        "threshold_low": 0.20,
+        "min_silence_duration_ms": 900
+      }
+    }
+  },
+  "audio": {
+    "sample_rate": 16000,
+    "frame_duration": 60,
+    "channels": 1,
+    "format": "opus"
+  }
+}

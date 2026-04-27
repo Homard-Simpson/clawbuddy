@@ -1,0 +1,59 @@
+# macOS / editor
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Local/runtime secrets
+.env
+.env.*
+!.env.example
+config/runtime.local.json
+*.local.json
+secrets/
+
+# Logs / temp
+*.log
+logs/
+tmp/
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ESP-IDF / firmware build artifacts
+firmware/**/build/
+firmware/**/managed_components/
+firmware/**/.espressif/
+firmware/**/*.elf
+firmware/**/*.map
+firmware/**/*.bin
+firmware/**/sdkconfig.old
+firmware/**/dependencies.lock
+
+# Nested source repos: track their files, not their Git internals
+**/.git/
+
+# Archives / release bundles
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+
+# Large generated media
+*.mp4
+*.mov
+*.wav
+*.mp3

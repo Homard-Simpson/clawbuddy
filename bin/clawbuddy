@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""ClawBuddy product CLI.
+
+Safe by default: operates on products/clawbuddy config only. Live Xiaozhi
+inspection is read-only and requires --live.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+VOICE_PROFILES = ROOT / "config" / "voice-profiles.json"
+RUNTIME_EXAMPLE = ROOT / "config" / "runtime.example.json"
+RUNTIME_LOCAL = ROOT / "config" / "runtime.local.json"
+LIVE_CONFIG = Path.home() / ".openclaw/workspace/xiaozhi-bridge/xiaozhi-esp32-server/main/xiaozhi-server/data/.config.yaml"
+
+
+def load_json(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text())
+
+
+def save_json(path: Path, data: dict[str, Any]) -> None:
+    path.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n")
+
+
+def tcp_open(host: str, port: int, timeout: float = 1.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def http_status(url: str, timeout: float = 2.0) -> int | None:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "clawbuddy-status/0.1"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - local status checks
+            return int(resp.status)
+    except Exception:
+        return None
+
+
+def run_text(cmd: list[str]) -> str:
+    try:
+        return subprocess.run(cmd, text=True, capture_output=True, timeout=4, check=False).stdout
+    except Exception:
+        return ""
+
+
+def parse_live_yaml_scalar(text: str, key: str) -> str | None:
+    # Good enough for the known Xiaozhi config shape; avoids adding PyYAML dependency.
+    m = re.search(rf"^\s*{re.escape(key)}:\s*([^#\n]+)", text, re.M)
+    return m.group(1).strip().strip('"\'') if m else None
+
+
+def live_config_snapshot() -> dict[str, Any]:
+    out: dict[str, Any] = {"path": str(LIVE_CONFIG), "exists": LIVE_CONFIG.exists()}
+    if not LIVE_CONFIG.exists():
+        return out
+    text = LIVE_CONFIG.read_text(errors="ignore")
+    out["audio"] = {
+        "sample_rate": parse_live_yaml_scalar(text, "sample_rate"),
+        "frame_duration": parse_live_yaml_scalar(text, "frame_duration"),
+    }
+    # Limit VAD parse to the Silero-ish block by just taking known scalar names.
+    out["silero"] = {
+        "threshold": parse_live_yaml_scalar(text, "threshold"),
+        "threshold_low": parse_live_yaml_scalar(text, "threshold_low"),
+        "min_silence_duration_ms": parse_live_yaml_scalar(text, "min_silence_duration_ms"),
+    }
+    return out
+
+
+def profile_data() -> dict[str, Any]:
+    return load_json(VOICE_PROFILES)
+
+
+def runtime_data() -> tuple[Path, dict[str, Any]]:
+    path = RUNTIME_LOCAL if RUNTIME_LOCAL.exists() else RUNTIME_EXAMPLE
+    return path, load_json(path)
+
+
+def product_status(include_live: bool = False) -> dict[str, Any]:
+    profiles = profile_data()
+    runtime_path, runtime = runtime_data()
+    selected = runtime.get("profile") or profiles.get("defaultProfile")
+    planned_ports = runtime.get("ports", {})
+    port_checks = {
+        name: {"port": port, "occupied": tcp_open("127.0.0.1", int(port))}
+        for name, port in planned_ports.items()
+    }
+    result: dict[str, Any] = {
+        "root": str(ROOT),
+        "runtimeConfig": str(runtime_path),
+        "profile": selected,
+        "profileValid": selected in profiles.get("profiles", {}),
+        "publicExposureEnabled": bool(runtime.get("publicExposure", {}).get("enabled")),
+        "launchAgentPrefix": runtime.get("launchAgentPrefix"),
+        "plannedPorts": port_checks,
+        "separationOk": runtime.get("launchAgentPrefix") == "com.openclaw.clawbuddy"
+        and all(int(v.get("port", 0)) not in (8000, 8003, 8004, 8899, 10000) for v in port_checks.values()),
+    }
+    if include_live:
+        serve = run_text(["tailscale", "serve", "status"])
+        result["livePrototype"] = {
+            "ports": {
+                "xiaozhiWebsocket8000": tcp_open("127.0.0.1", 8000),
+                "ota8003": tcp_open("127.0.0.1", 8003),
+                "mcp8004": tcp_open("127.0.0.1", 8004),
+                "bridge8899": tcp_open("127.0.0.1", 8899),
+            },
+            "http": {
+                "serverRoot": http_status("http://127.0.0.1:8000/"),
+                "ota": http_status("http://127.0.0.1:8003/xiaozhi/ota/"),
+                "bridgeHealth": http_status("http://127.0.0.1:8899/health"),
+            },
+            "funnel10000": "Funnel on" in serve and ":10000" in serve,
+            "config": live_config_snapshot(),
+            "readOnly": True,
+        }
+    return result
+
+
+def print_status(data: dict[str, Any]) -> None:
+    print("ClawBuddy")
+    print(f"root: {data['root']}")
+    print(f"runtime: {data['runtimeConfig']}")
+    print(f"profile: {data['profile']} ({'ok' if data['profileValid'] else 'INVALID'})")
+    print(f"separation: {'ok' if data['separationOk'] else 'CHECK'}")
+    print(f"public exposure: {'on' if data['publicExposureEnabled'] else 'off'}")
+    print("planned ports:")
+    for name, check in data["plannedPorts"].items():
+        state = "occupied" if check["occupied"] else "free"
+        print(f"  - {name}: {check['port']} {state}")
+    live = data.get("livePrototype")
+    if live:
+        print("live Xiaozhi prototype (read-only):")
+        print("  ports: " + ", ".join(f"{k}={'ok' if v else 'down'}" for k, v in live["ports"].items()))
+        print("  http: " + ", ".join(f"{k}={v}" for k, v in live["http"].items()))
+        print(f"  funnel10000: {'ok' if live['funnel10000'] else 'missing'}")
+        cfg = live.get("config", {})
+        print(f"  audio: {cfg.get('audio')}")
+        print(f"  silero: {cfg.get('silero')}")
+
+
+def cmd_profiles(args: argparse.Namespace) -> int:
+    data = profile_data()
+    if args.json:
+        print(json.dumps(data, indent=2))
+        return 0
+    print(f"default: {data.get('defaultProfile')}")
+    for name, profile in data.get("profiles", {}).items():
+        silero = profile.get("silero", {})
+        print(f"- {name}: {profile.get('description')}")
+        print(
+            "  "
+            + f"threshold={silero.get('threshold')} "
+            + f"threshold_low={silero.get('threshold_low')} "
+            + f"silence_ms={silero.get('min_silence_duration_ms')}"
+        )
+    return 0
+
+
+def cmd_tune(args: argparse.Namespace) -> int:
+    profiles = profile_data()
+    if args.profile not in profiles.get("profiles", {}):
+        print(f"Unknown profile: {args.profile}", file=sys.stderr)
+        return 2
+    source = RUNTIME_LOCAL if RUNTIME_LOCAL.exists() else RUNTIME_EXAMPLE
+    runtime = load_json(source)
+    runtime["profile"] = args.profile
+    save_json(RUNTIME_LOCAL, runtime)
+    if args.json:
+        print(json.dumps({"updated": str(RUNTIME_LOCAL), "profile": args.profile, "liveMutated": False}, indent=2))
+    else:
+        print(f"Set ClawBuddy product profile to {args.profile} in {RUNTIME_LOCAL}")
+        print("Live Xiaozhi bridge was not changed.")
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    data = product_status(include_live=args.live)
+    if args.json:
+        print(json.dumps(data, indent=2))
+    else:
+        print_status(data)
+    return 0 if data["profileValid"] and data["separationOk"] else 1
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    if RUNTIME_LOCAL.exists() and not args.force:
+        print(f"Already exists: {RUNTIME_LOCAL}")
+        return 0
+    save_json(RUNTIME_LOCAL, load_json(RUNTIME_EXAMPLE))
+    print(f"Created {RUNTIME_LOCAL}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="clawbuddy", description="ClawBuddy product CLI")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    sp = sub.add_parser("status", help="Show product runtime status")
+    sp.add_argument("--live", action="store_true", help="Read-only compare against live Xiaozhi prototype")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_status)
+
+    sp = sub.add_parser("profiles", help="List voice input tuning profiles")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_profiles)
+
+    sp = sub.add_parser("tune", help="Set product voice input profile; does not touch live Xiaozhi")
+    sp.add_argument("profile", choices=sorted(profile_data().get("profiles", {}).keys()))
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_tune)
+
+    sp = sub.add_parser("init", help="Create runtime.local.json from example")
+    sp.add_argument("--force", action="store_true")
+    sp.set_defaults(func=cmd_init)
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    return int(args.func(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
