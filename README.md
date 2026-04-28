@@ -199,6 +199,36 @@ After flashing:
 
 For public prototypes, avoid putting secrets, personal hostnames, or private network names in committed files.
 
+
+## Make it work anywhere with Tailscale
+
+If you want ClawBuddy to work outside your home network, use Tailscale Funnel/Serve on the Mac or server that runs OpenClaw.
+
+Plain English:
+
+- ClawBuddy joins any normal Wi‑Fi network.
+- Your Mac/server stays on Tailscale.
+- Tailscale gives the server an HTTPS address.
+- ClawBuddy calls that HTTPS OTA URL, then receives the websocket/server details from OTA.
+
+![ClawBuddy Tailscale anywhere flow](docs/assets/clawbuddy-tailscale-anywhere.svg)
+
+Read the full guide: [`docs/TAILSCALE_SETUP.md`](docs/TAILSCALE_SETUP.md).
+
+The OTA URL to build into firmware looks like this:
+
+```text
+https://<your-tailnet-host>:<https-port>/xiaozhi/ota/
+```
+
+For the current prototype, set that as `CONFIG_OTA_URL` before building firmware. The config lives here:
+
+```text
+firmware/clawbuddy/main/boards/waveshare/esp32-s3-touch-amoled-1.8/config.json
+```
+
+First-time Wi‑Fi setup gets the device onto Wi‑Fi. The OTA URL is not currently a normal friendly setup-page field; it is mainly a firmware build setting, with an advanced saved-device `ota_url` override if one already exists.
+
 ## Optional HT-HC33 vision camera
 
 The camera prototype is separate from the main ClawBuddy device.

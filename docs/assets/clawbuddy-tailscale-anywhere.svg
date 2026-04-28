@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="520" viewBox="0 0 1180 520" role="img" aria-labelledby="title desc">
+  <title id="title">ClawBuddy Tailscale anywhere flow</title>
+  <desc id="desc">Diagram showing ClawBuddy connecting over Wi-Fi to a Tailscale Funnel URL, then to local OTA and websocket services, then OpenClaw.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#10263d"/>
+      <stop offset="1" stop-color="#061019"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#7dffb3"/>
+    </marker>
+    <style>
+      .label{font:700 22px system-ui,-apple-system,Segoe UI,sans-serif;fill:#e8f6ff}
+      .small{font:500 15px system-ui,-apple-system,Segoe UI,sans-serif;fill:#9cc7d8}
+      .tiny{font:500 13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#b7ddeb}
+      .box{fill:rgba(12,23,34,.95);stroke:#59e4ff;stroke-opacity:.5;stroke-width:2;rx:18}
+      .green{stroke:#7dffb3}.amber{stroke:#ffcc66}.violet{stroke:#b38cff}
+      .line{fill:none;stroke:#7dffb3;stroke-width:4;marker-end:url(#arrow)}
+      .mutedline{fill:none;stroke:#59e4ff;stroke-width:3;stroke-dasharray:8 8;marker-end:url(#arrow);opacity:.8}
+    </style>
+  </defs>
+  <rect width="1180" height="520" fill="url(#bg)"/>
+  <circle cx="210" cy="100" r="150" fill="#59e4ff" opacity=".08"/>
+  <circle cx="980" cy="410" r="180" fill="#7dffb3" opacity=".07"/>
+
+  <rect class="box green" x="45" y="150" width="210" height="160" rx="18"/>
+  <text class="label" x="150" y="198" text-anchor="middle">ClawBuddy</text>
+  <text class="small" x="150" y="226" text-anchor="middle">ESP32-S3 device</text>
+  <text class="tiny" x="150" y="258" text-anchor="middle">records voice</text>
+  <text class="tiny" x="150" y="280" text-anchor="middle">plays response</text>
+
+  <rect class="box amber" x="330" y="150" width="230" height="160" rx="18"/>
+  <text class="label" x="445" y="198" text-anchor="middle">Wi‑Fi</text>
+  <text class="small" x="445" y="226" text-anchor="middle">any normal network</text>
+  <text class="tiny" x="445" y="258" text-anchor="middle">home, hotspot, hotel</text>
+  <text class="tiny" x="445" y="280" text-anchor="middle">no Tailscale on ESP</text>
+
+  <rect class="box violet" x="635" y="90" width="260" height="120" rx="18"/>
+  <text class="label" x="765" y="136" text-anchor="middle">Tailscale Funnel</text>
+  <text class="small" x="765" y="164" text-anchor="middle">public HTTPS bridge</text>
+  <text class="tiny" x="765" y="188" text-anchor="middle">/xiaozhi/ota/ + /xiaozhi/v1/</text>
+
+  <rect class="box" x="635" y="285" width="260" height="145" rx="18"/>
+  <text class="label" x="765" y="330" text-anchor="middle">Local server</text>
+  <text class="small" x="765" y="358" text-anchor="middle">runs on your Mac/server</text>
+  <text class="tiny" x="765" y="386" text-anchor="middle">OTA: 127.0.0.1:8003</text>
+  <text class="tiny" x="765" y="408" text-anchor="middle">Voice WS: 127.0.0.1:8000</text>
+
+  <rect class="box green" x="960" y="150" width="180" height="160" rx="18"/>
+  <text class="label" x="1050" y="198" text-anchor="middle">OpenClaw</text>
+  <text class="small" x="1050" y="226" text-anchor="middle">agent brain</text>
+  <text class="tiny" x="1050" y="258" text-anchor="middle">tools</text>
+  <text class="tiny" x="1050" y="280" text-anchor="middle">memory</text>
+
+  <path class="line" d="M255 230 C285 230 300 230 330 230"/>
+  <path class="line" d="M560 230 C595 205 605 170 635 150"/>
+  <path class="line" d="M765 210 L765 285"/>
+  <path class="line" d="M895 355 C935 330 940 260 960 230"/>
+  <path class="mutedline" d="M960 250 C900 470 350 470 180 310"/>
+
+  <text class="tiny" x="295" y="214" text-anchor="middle">HTTPS</text>
+  <text class="tiny" x="610" y="194" text-anchor="middle">OTA URL</text>
+  <text class="tiny" x="825" y="257" text-anchor="middle">routes to localhost</text>
+  <text class="tiny" x="930" y="332" text-anchor="middle">agent request</text>
+  <text class="tiny" x="555" y="488" text-anchor="middle">answer audio/text returns to the device</text>
+</svg>
