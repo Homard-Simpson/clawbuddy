@@ -217,11 +217,15 @@ void Application::Run() {
         }
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
-            while (auto packet = audio_service_.PopPacketFromSendQueue()) {
-                if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
-                    break;
+            FlushPendingPttIfReady();
+            if (!pending_ptt_capture_) {
+                while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+                    if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
+                        break;
+                    }
                 }
             }
+            FinishPendingPttCapture();
         }
 
         if (bits & MAIN_EVENT_WAKE_WORD_DETECTED) {
@@ -507,6 +511,10 @@ void Application::InitializeProtocol() {
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
+            pending_ptt_capture_ = false;
+            ptt_stop_requested_ = false;
+            listening_start_sent_ = false;
+            audio_channel_open_in_progress_ = false;
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
@@ -706,18 +714,38 @@ void Application::HandleToggleChatEvent() {
 }
 
 void Application::ContinueOpenAudioChannel(ListeningMode mode) {
-    // Check state again in case it was changed during scheduling
-    if (GetDeviceState() != kDeviceStateConnecting) {
+    // Check state again in case it was changed during scheduling. PTT may
+    // already be in Listening so the user can speak while transport opens.
+    auto state = GetDeviceState();
+    if (state != kDeviceStateConnecting && !(pending_ptt_capture_ && state == kDeviceStateListening)) {
+        return;
+    }
+    if (audio_channel_open_in_progress_) {
         return;
     }
 
+    audio_channel_open_in_progress_ = true;
     if (!protocol_->IsAudioChannelOpened()) {
         if (!protocol_->OpenAudioChannel()) {
+            audio_channel_open_in_progress_ = false;
+            if (pending_ptt_capture_) {
+                pending_ptt_capture_ = false;
+                ptt_stop_requested_ = false;
+                listening_start_sent_ = false;
+                audio_service_.ClearSendQueue();
+                SetDeviceState(kDeviceStateIdle);
+            }
             return;
         }
     }
+    audio_channel_open_in_progress_ = false;
 
-    SetListeningMode(mode);
+    if (pending_ptt_capture_) {
+        FlushPendingPttIfReady();
+        FinishPendingPttCapture();
+    } else {
+        SetListeningMode(mode);
+    }
 }
 
 void Application::HandleStartListeningEvent() {
@@ -738,15 +766,22 @@ void Application::HandleStartListeningEvent() {
     }
     
     if (state == kDeviceStateIdle) {
-        if (!protocol_->IsAudioChannelOpened()) {
-            SetDeviceState(kDeviceStateConnecting);
-            // Schedule to let the state change be processed first (UI update)
+        listening_mode_ = kListeningModeManualStop;
+        listening_start_sent_ = false;
+        ptt_stop_requested_ = false;
+        pending_ptt_capture_ = !protocol_->IsAudioChannelOpened();
+
+        // Start microphone capture/UI immediately on button-down. If the
+        // websocket/session is not ready yet, encoded Opus stays queued and is
+        // flushed in order once OpenAudioChannel completes.
+        SetDeviceState(kDeviceStateListening);
+        if (pending_ptt_capture_) {
             Schedule([this]() {
                 ContinueOpenAudioChannel(kListeningModeManualStop);
             });
             return;
         }
-        SetListeningMode(kListeningModeManualStop);
+        FlushPendingPttIfReady();
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
         SetListeningMode(kListeningModeManualStop);
@@ -761,9 +796,16 @@ void Application::HandleStopListeningEvent() {
         SetDeviceState(kDeviceStateWifiConfiguring);
         return;
     } else if (state == kDeviceStateListening) {
+        if (pending_ptt_capture_) {
+            ptt_stop_requested_ = true;
+            audio_service_.EnableVoiceProcessing(false);
+            FinishPendingPttCapture();
+            return;
+        }
         if (protocol_) {
             protocol_->SendStopListening();
         }
+        listening_start_sent_ = false;
         SetDeviceState(kDeviceStateIdle);
     }
 }
@@ -859,6 +901,10 @@ void Application::HandleStateChangedEvent() {
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
+            if (!pending_ptt_capture_) {
+                ptt_stop_requested_ = false;
+                listening_start_sent_ = false;
+            }
             display->SetStatus(Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
@@ -882,8 +928,9 @@ void Application::HandleStateChangedEvent() {
                     audio_service_.WaitForPlaybackQueueEmpty();
                 }
                 
-                // Send the start listening command
-                protocol_->SendStartListening(listening_mode_);
+                if (!pending_ptt_capture_) {
+                    EnsureListeningSessionStarted();
+                }
                 audio_service_.EnableVoiceProcessing(true);
             }
 
@@ -905,6 +952,7 @@ void Application::HandleStateChangedEvent() {
             display->SetStatus(Lang::Strings::SPEAKING);
 
             if (listening_mode_ != kListeningModeRealtime) {
+                listening_start_sent_ = false;
                 audio_service_.EnableVoiceProcessing(false);
                 // Only AFE wake word can be detected in speaking mode
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
@@ -929,6 +977,52 @@ void Application::Schedule(std::function<void()>&& callback) {
     xEventGroupSetBits(event_group_, MAIN_EVENT_SCHEDULE);
 }
 
+bool Application::EnsureListeningSessionStarted() {
+    if (listening_start_sent_) {
+        return true;
+    }
+    if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
+        return false;
+    }
+    protocol_->SendStartListening(listening_mode_);
+    listening_start_sent_ = true;
+    return true;
+}
+
+void Application::FlushPendingPttIfReady() {
+    if (!pending_ptt_capture_) {
+        return;
+    }
+    if (!EnsureListeningSessionStarted()) {
+        return;
+    }
+    while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+        if (!protocol_->SendAudio(std::move(packet))) {
+            break;
+        }
+    }
+}
+
+void Application::FinishPendingPttCapture() {
+    if (!pending_ptt_capture_ || !ptt_stop_requested_) {
+        return;
+    }
+    FlushPendingPttIfReady();
+    if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
+        return;
+    }
+    if (audio_service_.HasPendingSendAudio()) {
+        return;
+    }
+    if (listening_start_sent_) {
+        protocol_->SendStopListening();
+    }
+    pending_ptt_capture_ = false;
+    ptt_stop_requested_ = false;
+    listening_start_sent_ = false;
+    SetDeviceState(kDeviceStateIdle);
+}
+
 void Application::AbortSpeaking(AbortReason reason) {
     ESP_LOGI(TAG, "Abort speaking");
     aborted_ = true;
@@ -939,6 +1033,7 @@ void Application::AbortSpeaking(AbortReason reason) {
 
 void Application::SetListeningMode(ListeningMode mode) {
     listening_mode_ = mode;
+    listening_start_sent_ = false;
     SetDeviceState(kDeviceStateListening);
 }
 

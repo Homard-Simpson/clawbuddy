@@ -57,3 +57,8 @@ firmware/**/dependencies.lock
 *.mov
 *.wav
 *.mp3
+# Optional third-party Arduino core checkout (not vendored in public repo)
+camera/ESP_HaLow/
+
+
+.learnings/

@@ -2,7 +2,7 @@
 
 ## 2026-04-25
 
-- Captured live upstream prototype prototype voice-input improvement as a ClawBuddy product requirement.
+- Captured live upstream prototype voice-input improvement as a ClawBuddy product requirement.
 - Product should support a named voice-input tuning profile instead of requiring manual YAML edits.
 - Current live prototype tuning that feels better: Silero VAD `threshold: 0.40`, `threshold_low: 0.20`, `min_silence_duration_ms: 900`, with ESP/server audio aligned at 16 kHz.
 
@@ -21,3 +21,15 @@
 - Added runtime separation config on non-upstream prototype ports `8100/8103/8104/8199`.
 - Added docs: runtime ports/labels, security model, healthcheck spec, bridge README, demo script.
 - Validated with `make test`; live upstream prototype comparison is read-only and does not mutate the working bridge.
+## 2026-04-28 — public prototype hardening
+
+- Removed the broken `camera/ESP_HaLow` gitlink from tracked files and documented it as an optional, local-only third-party dependency.
+- Redacted firmware Wi-Fi password logging in acoustic provisioning and BLUFI setup paths.
+- Added root `LICENSE`, `NOTICE.md`, and `SECURITY.md` public-readiness docs.
+- Documented the HT-HC33 `openclaw-vision` setup AP password as an insecure prototype/recovery credential only.
+
+## 2026-04-28 — prototype onboarding and PTT hardening
+
+- Made HT-HC33 setup AP credentials per-device by default; shared AP password now requires explicit `CAMERA_DEV_SHARED_AP_PASSWORD` bench build.
+- Improved push-to-talk startup: microphone capture starts immediately on button-down and buffers audio while websocket/session setup completes.
+- Added concise public prototype quick-start commands to the repo README, including prerequisites, build/test, flash, and provisioning notes.

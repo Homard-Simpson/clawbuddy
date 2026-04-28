@@ -140,6 +140,10 @@ private:
     bool aborted_ = false;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
+    bool pending_ptt_capture_ = false;      // Local PTT audio captured before transport/session is ready
+    bool ptt_stop_requested_ = false;       // Button released; send buffered audio then stop when possible
+    bool listening_start_sent_ = false;     // Server has received listen start for current capture
+    bool audio_channel_open_in_progress_ = false;
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 
@@ -155,6 +159,9 @@ private:
     void HandleWakeWordDetectedEvent();
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);
+    void FlushPendingPttIfReady();
+    void FinishPendingPttCapture();
+    bool EnsureListeningSessionStarted();
 
     // Activation task (runs in background)
     void ActivationTask();

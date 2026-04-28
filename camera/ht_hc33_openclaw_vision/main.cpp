@@ -4,15 +4,18 @@
 #include <DNSServer.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
+#include <esp_system.h>
 
 // OpenClaw ESP32 bridge vision camera for Heltec HT-HC33.
 // Runs as a setup AP + captive portal, and can also join home Wi-Fi.
 
-#ifndef CAMERA_AP_SSID
-#define CAMERA_AP_SSID "OpenClaw-Vision"
+#ifndef CAMERA_AP_SSID_PREFIX
+#define CAMERA_AP_SSID_PREFIX "OpenClaw-Vision"
 #endif
-#ifndef CAMERA_AP_PASSWORD
-#define CAMERA_AP_PASSWORD "openclaw-vision"
+#ifdef CAMERA_DEV_SHARED_AP_PASSWORD
+// Development benches only. Production/default firmware generates and stores a
+// per-device setup AP password instead of sharing one password across cameras.
+#define CAMERA_DEV_AP_PASSWORD "openclaw-vision"
 #endif
 #ifndef CAMERA_HOSTNAME
 #define CAMERA_HOSTNAME "openclaw-vision"
@@ -24,9 +27,56 @@ static DNSServer dnsServer;
 static Preferences preferences;
 static String configuredSsid;
 static String lastStaIp;
+static String setupApSsid;
+static String setupApPassword;
 static bool staConnected = false;
 static bool setupPortalActive = false;
 static unsigned long staDisconnectedSince = 0;
+
+static String macSuffix(uint8_t bytes = 3) {
+  uint64_t mac = ESP.getEfuseMac();
+  String out;
+  for (int i = bytes - 1; i >= 0; --i) {
+    uint8_t b = (mac >> (8 * i)) & 0xff;
+    if (b < 16) out += '0';
+    out += String(b, HEX);
+  }
+  out.toUpperCase();
+  return out;
+}
+
+static String generatedSetupPassword() {
+#ifdef CAMERA_DEV_SHARED_AP_PASSWORD
+  return CAMERA_DEV_AP_PASSWORD;
+#else
+  static const char alphabet[] = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  String pass;
+  pass.reserve(16);
+  for (int i = 0; i < 14; ++i) {
+    pass += alphabet[esp_random() % (sizeof(alphabet) - 1)];
+  }
+  return pass;
+#endif
+}
+
+static String getSetupApSsid() {
+#ifdef CAMERA_AP_SSID
+  return String(CAMERA_AP_SSID);
+#else
+  return String(CAMERA_AP_SSID_PREFIX) + "-" + macSuffix();
+#endif
+}
+
+static String getSetupApPassword() {
+  preferences.begin("openclawcam", false);
+  String pass = preferences.getString("setup_pass", "");
+  if (pass.length() < 8) {
+    pass = generatedSetupPassword();
+    preferences.putString("setup_pass", pass);
+  }
+  preferences.end();
+  return pass;
+}
 
 static String jsonEscape(const String &in) {
   String out;
@@ -105,7 +155,8 @@ String cameraNetworkStatusJson() {
   IPAddress apIp = WiFi.softAPIP();
   String json = "{\"ok\":true,\"name\":\"OpenClaw Vision\",\"camera\":\"HT-HC33\"";
   json += ",\"hostname\":\"" CAMERA_HOSTNAME "\"";
-  json += ",\"ap_ssid\":\"" CAMERA_AP_SSID "\"";
+  json += ",\"ap_ssid\":\"" + jsonEscape(setupApSsid) + "\"";
+  json += ",\"setup_password_policy\":\"per-device\"";
   json += ",\"setup_portal_active\":" + String(setupPortalActive ? "true" : "false");
   json += ",\"ap_ip\":\"" + (setupPortalActive ? apIp.toString() : String("")) + "\"";
   json += ",\"sta_connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false");
@@ -121,7 +172,9 @@ void startSetupPortal() {
   Serial.println("Starting fallback setup portal...");
   WiFi.mode(WIFI_AP_STA);
   WiFi.setSleep(false);
-  bool ok = WiFi.softAP(CAMERA_AP_SSID, CAMERA_AP_PASSWORD, 6, 0, 2);
+  if (setupApSsid.isEmpty()) setupApSsid = getSetupApSsid();
+  if (setupApPassword.isEmpty()) setupApPassword = getSetupApPassword();
+  bool ok = WiFi.softAP(setupApSsid.c_str(), setupApPassword.c_str(), 6, 0, 2);
   if (!ok) {
     Serial.println("SoftAP start failed");
     return;
@@ -129,7 +182,12 @@ void startSetupPortal() {
   dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
   setupPortalActive = true;
   Serial.print("Setup AP SSID: ");
-  Serial.println(CAMERA_AP_SSID);
+  Serial.println(setupApSsid);
+  Serial.print("Setup AP password (per-device; keep private): ");
+  Serial.println(setupApPassword);
+#ifdef CAMERA_DEV_SHARED_AP_PASSWORD
+  Serial.println("WARNING: using development-only shared setup AP password.");
+#endif
   Serial.print("Setup AP IP: ");
   Serial.println(WiFi.softAPIP());
 }
@@ -308,6 +366,8 @@ void setup() {
   Serial.setDebugOutput(true);
   delay(500);
   Serial.println("OpenClaw Vision camera booting");
+  setupApSsid = getSetupApSsid();
+  setupApPassword = getSetupApPassword();
 
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;

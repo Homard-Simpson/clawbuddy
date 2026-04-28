@@ -1,15 +1,51 @@
 #include "esp_camera.h"
 #include <WiFi.h>
+#include <esp_system.h>
 
 // OpenClaw ESP32 bridge vision camera for Heltec HT-HC33.
 // Runs as a local Wi-Fi AP so the Mac can fetch http://192.168.4.1/capture.
 
-#ifndef CAMERA_AP_SSID
-#define CAMERA_AP_SSID "OpenClaw-Vision"
+#ifndef CAMERA_AP_SSID_PREFIX
+#define CAMERA_AP_SSID_PREFIX "OpenClaw-Vision"
 #endif
-#ifndef CAMERA_AP_PASSWORD
-#define CAMERA_AP_PASSWORD "openclaw-vision"
+#ifdef CAMERA_DEV_SHARED_AP_PASSWORD
+// Development benches only; default builds generate per-device credentials.
+#define CAMERA_DEV_AP_PASSWORD "openclaw-vision"
 #endif
+
+static String macSuffix(uint8_t bytes = 3) {
+  uint64_t mac = ESP.getEfuseMac();
+  String out;
+  for (int i = bytes - 1; i >= 0; --i) {
+    uint8_t b = (mac >> (8 * i)) & 0xff;
+    if (b < 16) out += '0';
+    out += String(b, HEX);
+  }
+  out.toUpperCase();
+  return out;
+}
+
+static String setupApSsid() {
+#ifdef CAMERA_AP_SSID
+  return String(CAMERA_AP_SSID);
+#else
+  return String(CAMERA_AP_SSID_PREFIX) + "-" + macSuffix();
+#endif
+}
+
+static String setupApPassword() {
+#ifdef CAMERA_DEV_SHARED_AP_PASSWORD
+  return CAMERA_DEV_AP_PASSWORD;
+#else
+  static const char alphabet[] = "23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  String pass;
+  pass.reserve(16);
+  for (int i = 0; i < 14; ++i) {
+    pass += alphabet[esp_random() % (sizeof(alphabet) - 1)];
+  }
+  return pass;
+#endif
+}
 
 // HT-HC33 camera pins from Heltec variant.
 #define PWDN_GPIO_NUM 20
@@ -82,7 +118,9 @@ void setup() {
 
   WiFi.mode(WIFI_AP);
   WiFi.setSleep(false);
-  bool ok = WiFi.softAP(CAMERA_AP_SSID, CAMERA_AP_PASSWORD, 6, 0, 2);
+  String apSsid = setupApSsid();
+  String apPassword = setupApPassword();
+  bool ok = WiFi.softAP(apSsid.c_str(), apPassword.c_str(), 6, 0, 2);
   if (!ok) {
     Serial.println("SoftAP start failed");
     delay(5000);
@@ -90,7 +128,12 @@ void setup() {
   }
 
   Serial.print("AP SSID: ");
-  Serial.println(CAMERA_AP_SSID);
+  Serial.println(apSsid);
+  Serial.print("AP password (per-device; keep private): ");
+  Serial.println(apPassword);
+#ifdef CAMERA_DEV_SHARED_AP_PASSWORD
+  Serial.println("WARNING: using development-only shared setup AP password.");
+#endif
   Serial.print("AP IP: ");
   Serial.println(WiFi.softAPIP());
   Serial.println("Snapshot: http://192.168.4.1/capture");
