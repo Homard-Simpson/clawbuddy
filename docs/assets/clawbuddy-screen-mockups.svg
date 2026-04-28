@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="520" viewBox="0 0 1120 520" role="img" aria-labelledby="title desc">
+  <title id="title">Illustrative ClawBuddy screen mockups</title>
+  <desc id="desc">Illustrative, not real screenshots, showing possible ClawBuddy device screens for listening, answering, and setup.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f8fafc}.device{fill:#111827;stroke:#020617;stroke-width:3}.screen{fill:#0f172a}.screen2{fill:#172554}.screen3{fill:#14532d}.title{font:700 22px system-ui,-apple-system,Segoe UI,sans-serif;fill:#0f172a}.note{font:14px system-ui,-apple-system,Segoe UI,sans-serif;fill:#475569}.uiTitle{font:700 18px system-ui,-apple-system,Segoe UI,sans-serif;fill:#fff}.uiText{font:14px system-ui,-apple-system,Segoe UI,sans-serif;fill:#dbeafe}.chip{fill:#38bdf8}.chip2{fill:#22c55e}.button{fill:#334155;stroke:#94a3b8}.caption{font:600 16px system-ui,-apple-system,Segoe UI,sans-serif;fill:#0f172a}.small{font:12px system-ui,-apple-system,Segoe UI,sans-serif;fill:#64748b}
+    </style>
+  </defs>
+  <rect class="bg" width="1120" height="520" rx="24"/>
+  <text x="40" y="48" class="title">Illustrative screen mockups</text>
+  <text x="40" y="76" class="note">These are SVG mockups for documentation, not photos or real device screenshots.</text>
+
+  <g transform="translate(95,120)">
+    <rect class="device" width="230" height="300" rx="34"/>
+    <rect class="screen" x="25" y="28" width="180" height="220" rx="18"/>
+    <circle class="button" cx="115" cy="270" r="12"/>
+    <circle class="chip" cx="115" cy="88" r="36" opacity="0.9"/>
+    <text x="115" y="154" text-anchor="middle" class="uiTitle">Listening…</text>
+    <text x="115" y="188" text-anchor="middle" class="uiText">Ask OpenClaw</text>
+    <rect x="62" y="206" width="106" height="8" rx="4" fill="#1d4ed8"/>
+    <rect x="62" y="206" width="68" height="8" rx="4" fill="#93c5fd"/>
+    <text x="115" y="338" text-anchor="middle" class="caption">Voice request</text>
+  </g>
+
+  <g transform="translate(445,120)">
+    <rect class="device" width="230" height="300" rx="34"/>
+    <rect class="screen2" x="25" y="28" width="180" height="220" rx="18"/>
+    <circle class="button" cx="115" cy="270" r="12"/>
+    <text x="115" y="78" text-anchor="middle" class="uiTitle">OpenClaw says</text>
+    <text x="115" y="122" text-anchor="middle" class="uiText">The garage</text>
+    <text x="115" y="146" text-anchor="middle" class="uiText">lights are off.</text>
+    <rect x="55" y="178" width="120" height="38" rx="19" fill="#2563eb"/>
+    <text x="115" y="202" text-anchor="middle" class="uiTitle">Done</text>
+    <text x="115" y="338" text-anchor="middle" class="caption">Response</text>
+  </g>
+
+  <g transform="translate(795,120)">
+    <rect class="device" width="230" height="300" rx="34"/>
+    <rect class="screen3" x="25" y="28" width="180" height="220" rx="18"/>
+    <circle class="button" cx="115" cy="270" r="12"/>
+    <text x="115" y="76" text-anchor="middle" class="uiTitle">Setup</text>
+    <text x="115" y="116" text-anchor="middle" class="uiText">Connect Wi‑Fi</text>
+    <rect x="52" y="142" width="126" height="36" rx="9" fill="#166534" stroke="#86efac"/>
+    <text x="115" y="165" text-anchor="middle" class="uiText">Network name</text>
+    <rect x="52" y="190" width="126" height="24" rx="12" class="chip2"/>
+    <text x="115" y="207" text-anchor="middle" class="small" fill="#052e16">Save locally</text>
+    <text x="115" y="338" text-anchor="middle" class="caption">First-time setup</text>
+  </g>
+</svg>

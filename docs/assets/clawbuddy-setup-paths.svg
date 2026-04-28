@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="620" viewBox="0 0 1120 620" role="img" aria-labelledby="title desc">
+  <title id="title">ClawBuddy setup paths</title>
+  <desc id="desc">Diagram showing normal ClawBuddy device setup, optional HT-HC33 camera setup access point, and local OpenClaw server connection.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#2563eb"/>
+    </marker>
+    <style>
+      .bg{fill:#fbfbff}.card{fill:#fff;stroke:#cbd5e1;stroke-width:2}.blue{fill:#eff6ff;stroke:#2563eb;stroke-width:2}.green{fill:#f0fdf4;stroke:#16a34a;stroke-width:2}.amber{fill:#fffbeb;stroke:#d97706;stroke-width:2}.title{font:700 22px system-ui,-apple-system,Segoe UI,sans-serif;fill:#0f172a}.label{font:700 17px system-ui,-apple-system,Segoe UI,sans-serif;fill:#0f172a}.small{font:14px system-ui,-apple-system,Segoe UI,sans-serif;fill:#334155}.tiny{font:12px system-ui,-apple-system,Segoe UI,sans-serif;fill:#475569}.line{stroke:#2563eb;stroke-width:3;fill:none;marker-end:url(#arrow)}.dash{stroke:#16a34a;stroke-width:3;fill:none;stroke-dasharray:8 7;marker-end:url(#arrow)}.warn{stroke:#d97706;stroke-width:3;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect class="bg" width="1120" height="620" rx="24"/>
+  <text x="40" y="48" class="title">ClawBuddy first-time setup paths</text>
+  <text x="40" y="76" class="small">The device and optional camera are configured separately, then both can talk to the local ClawBuddy/OpenClaw server.</text>
+
+  <rect x="60" y="130" width="210" height="135" rx="18" class="blue"/>
+  <text x="165" y="168" text-anchor="middle" class="label">Main device</text>
+  <text x="165" y="198" text-anchor="middle" class="small">ESP32-S3 Touch AMOLED</text>
+  <text x="165" y="224" text-anchor="middle" class="small">voice + touch UI</text>
+
+  <rect x="365" y="118" width="240" height="158" rx="18" class="card"/>
+  <text x="485" y="156" text-anchor="middle" class="label">Wi‑Fi provisioning</text>
+  <text x="485" y="188" text-anchor="middle" class="small">use screen/serial prompts</text>
+  <text x="485" y="214" text-anchor="middle" class="small">save local network</text>
+  <text x="485" y="240" text-anchor="middle" class="small">avoid committed secrets</text>
+
+  <rect x="700" y="128" width="270" height="138" rx="18" class="blue"/>
+  <text x="835" y="166" text-anchor="middle" class="label">ClawBuddy/OpenClaw server</text>
+  <text x="835" y="198" text-anchor="middle" class="small">local status API</text>
+  <text x="835" y="224" text-anchor="middle" class="small">WebSocket + OTA routes</text>
+
+  <path d="M270 198 H365" class="line"/>
+  <text x="318" y="180" text-anchor="middle" class="tiny">first boot</text>
+  <path d="M605 198 H700" class="line"/>
+  <text x="653" y="180" text-anchor="middle" class="tiny">normal Wi‑Fi</text>
+
+  <rect x="60" y="360" width="210" height="145" rx="18" class="green"/>
+  <text x="165" y="398" text-anchor="middle" class="label">Optional camera</text>
+  <text x="165" y="428" text-anchor="middle" class="small">HT-HC33 vision prototype</text>
+  <text x="165" y="454" text-anchor="middle" class="small">snapshots/streaming</text>
+
+  <rect x="365" y="345" width="240" height="176" rx="18" class="amber"/>
+  <text x="485" y="383" text-anchor="middle" class="label">Setup access point</text>
+  <text x="485" y="415" text-anchor="middle" class="small">OpenClaw‑Vision‑XXXXXX</text>
+  <text x="485" y="441" text-anchor="middle" class="small">per-device password</text>
+  <text x="485" y="467" text-anchor="middle" class="small">printed on serial monitor</text>
+  <text x="485" y="493" text-anchor="middle" class="small">used only for setup</text>
+
+  <rect x="700" y="368" width="270" height="128" rx="18" class="green"/>
+  <text x="835" y="406" text-anchor="middle" class="label">Same local network</text>
+  <text x="835" y="438" text-anchor="middle" class="small">server can request snapshots</text>
+  <text x="835" y="464" text-anchor="middle" class="small">camera remains optional</text>
+
+  <path d="M270 433 H365" class="warn"/>
+  <text x="318" y="415" text-anchor="middle" class="tiny">join setup AP</text>
+  <path d="M605 433 H700" class="dash"/>
+  <text x="653" y="415" text-anchor="middle" class="tiny">after Wi‑Fi setup</text>
+  <path d="M835 368 V266" class="dash"/>
+  <text x="918" y="323" text-anchor="middle" class="tiny">optional vision data</text>
+
+  <rect x="60" y="555" width="910" height="36" rx="12" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="515" y="578" text-anchor="middle" class="small">Public-safe rule: keep credentials, private domains, private hostnames, and personal contact details out of committed files.</text>
+</svg>

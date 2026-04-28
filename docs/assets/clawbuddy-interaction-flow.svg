@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="520" viewBox="0 0 1120 520" role="img" aria-labelledby="title desc">
+  <title id="title">ClawBuddy interaction flow</title>
+  <desc id="desc">A user talks to a ClawBuddy device. The device uses Wi-Fi, WebSocket, and OTA paths to reach a ClawBuddy OpenClaw server, which talks to an OpenClaw agent and returns a response.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#3056d3"/>
+    </marker>
+    <style>
+      .bg{fill:#f8fafc}.card{fill:#fff;stroke:#cbd5e1;stroke-width:2}.accent{fill:#eef2ff;stroke:#3056d3;stroke-width:2}.optional{fill:#f0fdf4;stroke:#16a34a;stroke-width:2}.title{font:700 22px system-ui,-apple-system,Segoe UI,sans-serif;fill:#0f172a}.label{font:600 17px system-ui,-apple-system,Segoe UI,sans-serif;fill:#0f172a}.small{font:14px system-ui,-apple-system,Segoe UI,sans-serif;fill:#334155}.tiny{font:12px system-ui,-apple-system,Segoe UI,sans-serif;fill:#475569}.line{stroke:#3056d3;stroke-width:3;fill:none;marker-end:url(#arrow)}.return{stroke:#7c3aed;stroke-width:3;fill:none;stroke-dasharray:8 6;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect class="bg" width="1120" height="520" rx="24"/>
+  <text x="40" y="48" class="title">ClawBuddy: from voice request to answer</text>
+  <text x="40" y="76" class="small">Public prototype architecture. Labels describe roles, not private hostnames or production infrastructure.</text>
+
+  <rect x="45" y="145" width="160" height="145" rx="18" class="card"/>
+  <circle cx="125" cy="190" r="32" fill="#dbeafe" stroke="#3056d3" stroke-width="2"/>
+  <path d="M125 226c-36 0-58 20-58 44h116c0-24-22-44-58-44z" fill="#dbeafe" stroke="#3056d3" stroke-width="2"/>
+  <text x="125" y="326" text-anchor="middle" class="label">User</text>
+  <text x="125" y="350" text-anchor="middle" class="small">speaks or taps</text>
+
+  <rect x="280" y="120" width="170" height="190" rx="24" class="accent"/>
+  <rect x="325" y="148" width="80" height="116" rx="14" fill="#111827"/>
+  <rect x="337" y="163" width="56" height="72" rx="8" fill="#60a5fa"/>
+  <circle cx="365" cy="249" r="6" fill="#e5e7eb"/>
+  <text x="365" y="326" text-anchor="middle" class="label">ClawBuddy device</text>
+  <text x="365" y="350" text-anchor="middle" class="small">ESP32-S3 handheld</text>
+
+  <rect x="520" y="120" width="210" height="190" rx="18" class="card"/>
+  <text x="625" y="164" text-anchor="middle" class="label">Wi‑Fi network</text>
+  <text x="625" y="196" text-anchor="middle" class="small">WebSocket for live audio</text>
+  <text x="625" y="222" text-anchor="middle" class="small">HTTP(S) for status/OTA</text>
+  <text x="625" y="248" text-anchor="middle" class="small">Local-first by default</text>
+
+  <rect x="800" y="105" width="230" height="220" rx="18" class="accent"/>
+  <text x="915" y="150" text-anchor="middle" class="label">ClawBuddy / OpenClaw server</text>
+  <text x="915" y="184" text-anchor="middle" class="small">receives device messages</text>
+  <text x="915" y="210" text-anchor="middle" class="small">checks device identity</text>
+  <text x="915" y="236" text-anchor="middle" class="small">offers OTA firmware path</text>
+  <text x="915" y="262" text-anchor="middle" class="small">connects to OpenClaw</text>
+
+  <rect x="800" y="382" width="230" height="92" rx="18" class="card"/>
+  <text x="915" y="420" text-anchor="middle" class="label">OpenClaw agent</text>
+  <text x="915" y="448" text-anchor="middle" class="small">does the assistant work</text>
+
+  <path d="M205 215 H280" class="line"/>
+  <text x="242" y="198" text-anchor="middle" class="tiny">voice/touch</text>
+  <path d="M450 198 H520" class="line"/>
+  <text x="485" y="181" text-anchor="middle" class="tiny">Wi‑Fi</text>
+  <path d="M730 198 H800" class="line"/>
+  <text x="765" y="181" text-anchor="middle" class="tiny">WebSocket</text>
+  <path d="M915 325 V382" class="line"/>
+  <text x="970" y="360" text-anchor="middle" class="tiny">agent call</text>
+  <path d="M800 445 C655 505 360 475 365 310" class="return"/>
+  <text x="560" y="468" text-anchor="middle" class="tiny">response returns to the device</text>
+  <path d="M820 285 C670 352 500 352 410 285" class="return"/>
+  <text x="612" y="352" text-anchor="middle" class="tiny">OTA/config can flow back when allowed</text>
+</svg>
