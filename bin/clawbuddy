@@ -20,16 +20,107 @@ ROOT = Path(__file__).resolve().parents[1]
 VOICE_PROFILES = ROOT / "config" / "voice-profiles.json"
 RUNTIME_EXAMPLE = ROOT / "config" / "runtime.example.json"
 RUNTIME_LOCAL = ROOT / "config" / "runtime.local.json"
+PAIRING_LOCAL = ROOT / "config" / "device-allowlist.local.json"
+PAIRING_EXAMPLE = ROOT / "config" / "device-allowlist.example.json"
 LIVE_CONFIG = Path.home() / ".openclaw/workspace/xiaozhi-bridge/xiaozhi-esp32-server/main/xiaozhi-server/data/.config.yaml"
-
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text())
 
-
 def save_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n")
 
+def default_pairing_data() -> dict[str, Any]:
+    return {"schema": "clawbuddy.device-allowlist.v1", "approved": [], "pending": []}
+
+def pairing_path() -> Path:
+    return PAIRING_LOCAL if PAIRING_LOCAL.exists() else PAIRING_EXAMPLE
+
+def load_pairing(path: Path | None = None) -> dict[str, Any]:
+    path = path or pairing_path()
+    if not path.exists():
+        return default_pairing_data()
+    data = load_json(path)
+    data.setdefault("schema", "clawbuddy.device-allowlist.v1")
+    data.setdefault("approved", [])
+    data.setdefault("pending", [])
+    return data
+
+def save_pairing(data: dict[str, Any]) -> None:
+    PAIRING_LOCAL.parent.mkdir(parents=True, exist_ok=True)
+    save_json(PAIRING_LOCAL, data)
+
+def normalize_device_id(value: str) -> str:
+    value = value.strip().lower().replace("-", ":")
+    compact = value.replace(":", "")
+    if len(compact) == 12 and all(c in "0123456789abcdef" for c in compact):
+        return ":".join(compact[i : i + 2] for i in range(0, 12, 2))
+    if re.fullmatch(r"[0-9a-f]{2}(:[0-9a-f]{2}){5}", value):
+        return value
+    raise ValueError("device-id must be a Wi-Fi MAC address like aa:bb:cc:dd:ee:ff")
+
+def normalize_client_id(value: str) -> str:
+    value = value.strip().lower()
+    if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", value):
+        return value
+    raise ValueError("client-id must be a UUID like 00000000-0000-4000-8000-000000000000")
+
+def pair_record(device_id: str, client_id: str, label: str = "") -> dict[str, Any]:
+    rec: dict[str, Any] = {"device_id": normalize_device_id(device_id), "client_id": normalize_client_id(client_id)}
+    if label.strip():
+        rec["label"] = label.strip()
+    return rec
+
+def record_key(rec: dict[str, Any]) -> tuple[str, str]:
+    return (str(rec.get("device_id", "")).lower(), str(rec.get("client_id", "")).lower())
+
+def add_pairing(device_id: str, client_id: str, label: str = "", pending: bool = False) -> dict[str, Any]:
+    data = load_pairing()
+    rec = pair_record(device_id, client_id, label)
+    target = "pending" if pending else "approved"
+    other = "approved" if pending else "pending"
+    key = record_key(rec)
+    data[other] = [r for r in data.get(other, []) if record_key(r) != key]
+    for existing in data.get(target, []):
+        if record_key(existing) == key:
+            if label.strip():
+                existing["label"] = label.strip()
+            save_pairing(data)
+            return existing
+    data.setdefault(target, []).append(rec)
+    save_pairing(data)
+    return rec
+
+def yaml_list_block(key: str, values: list[str], indent: int = 4) -> str:
+    pad = " " * indent
+    item_pad = " " * (indent + 2)
+    if not values:
+        return f"{pad}{key}: []"
+    return f"{pad}{key}:\n" + "\n".join(f"{item_pad}- {v}" for v in values)
+
+def pairing_snippet(data: dict[str, Any] | None = None) -> str:
+    data = data or load_pairing()
+    approved = data.get("approved", [])
+    devices = sorted({str(r.get("device_id")) for r in approved if r.get("device_id")})
+    clients = sorted({str(r.get("client_id")) for r in approved if r.get("client_id")})
+    return "\n".join([
+        "server:",
+        "  auth:",
+        "    enabled: true",
+        yaml_list_block("allowed_devices", devices),
+        yaml_list_block("allowed_clients", clients),
+    ]) + "\n"
+
+def pairing_status() -> dict[str, Any]:
+    data = load_pairing()
+    return {
+        "path": str(pairing_path()),
+        "localPath": str(PAIRING_LOCAL),
+        "approved": data.get("approved", []),
+        "pending": data.get("pending", []),
+        "configSnippet": pairing_snippet(data),
+        "liveMutated": False,
+    }
 
 def tcp_open(host: str, port: int, timeout: float = 1.0) -> bool:
     try:
@@ -37,7 +128,6 @@ def tcp_open(host: str, port: int, timeout: float = 1.0) -> bool:
             return True
     except OSError:
         return False
-
 
 def http_status(url: str, timeout: float = 2.0) -> int | None:
     try:
@@ -47,19 +137,16 @@ def http_status(url: str, timeout: float = 2.0) -> int | None:
     except Exception:
         return None
 
-
 def run_text(cmd: list[str]) -> str:
     try:
         return subprocess.run(cmd, text=True, capture_output=True, timeout=4, check=False).stdout
     except Exception:
         return ""
 
-
 def parse_live_yaml_scalar(text: str, key: str) -> str | None:
     # Good enough for the known prototype config shape; avoids adding PyYAML dependency.
     m = re.search(rf"^\s*{re.escape(key)}:\s*([^#\n]+)", text, re.M)
     return m.group(1).strip().strip('"\'') if m else None
-
 
 def live_config_snapshot() -> dict[str, Any]:
     out: dict[str, Any] = {"path": str(LIVE_CONFIG), "exists": LIVE_CONFIG.exists()}
@@ -78,15 +165,12 @@ def live_config_snapshot() -> dict[str, Any]:
     }
     return out
 
-
 def profile_data() -> dict[str, Any]:
     return load_json(VOICE_PROFILES)
-
 
 def runtime_data() -> tuple[Path, dict[str, Any]]:
     path = RUNTIME_LOCAL if RUNTIME_LOCAL.exists() else RUNTIME_EXAMPLE
     return path, load_json(path)
-
 
 def product_status(include_live: bool = False) -> dict[str, Any]:
     profiles = profile_data()
@@ -103,6 +187,7 @@ def product_status(include_live: bool = False) -> dict[str, Any]:
         "profile": selected,
         "profileValid": selected in profiles.get("profiles", {}),
         "publicExposureEnabled": bool(runtime.get("publicExposure", {}).get("enabled")),
+        "pairing": {"path": str(pairing_path()), "approvedCount": len(load_pairing().get("approved", [])), "pendingCount": len(load_pairing().get("pending", []))},
         "launchAgentPrefix": runtime.get("launchAgentPrefix"),
         "plannedPorts": port_checks,
         "separationOk": runtime.get("launchAgentPrefix") == "com.openclaw.clawbuddy"
@@ -128,7 +213,6 @@ def product_status(include_live: bool = False) -> dict[str, Any]:
         }
     return result
 
-
 def print_status(data: dict[str, Any]) -> None:
     print("ClawBuddy")
     print(f"root: {data['root']}")
@@ -136,6 +220,8 @@ def print_status(data: dict[str, Any]) -> None:
     print(f"profile: {data['profile']} ({'ok' if data['profileValid'] else 'INVALID'})")
     print(f"separation: {'ok' if data['separationOk'] else 'CHECK'}")
     print(f"public exposure: {'on' if data['publicExposureEnabled'] else 'off'}")
+    pairing = data.get("pairing", {})
+    print(f"pairing: {pairing.get('approvedCount', 0)} approved, {pairing.get('pendingCount', 0)} pending ({pairing.get('path')})")
     print("planned ports:")
     for name, check in data["plannedPorts"].items():
         state = "occupied" if check["occupied"] else "free"
@@ -149,7 +235,6 @@ def print_status(data: dict[str, Any]) -> None:
         cfg = live.get("config", {})
         print(f"  audio: {cfg.get('audio')}")
         print(f"  silero: {cfg.get('silero')}")
-
 
 def cmd_profiles(args: argparse.Namespace) -> int:
     data = profile_data()
@@ -168,7 +253,6 @@ def cmd_profiles(args: argparse.Namespace) -> int:
         )
     return 0
 
-
 def cmd_tune(args: argparse.Namespace) -> int:
     profiles = profile_data()
     if args.profile not in profiles.get("profiles", {}):
@@ -185,6 +269,42 @@ def cmd_tune(args: argparse.Namespace) -> int:
         print("Live prototype bridge was not changed.")
     return 0
 
+def cmd_pair(args: argparse.Namespace) -> int:
+    if args.pair_cmd == "add":
+        try:
+            rec = add_pairing(args.device_id, args.client_id, args.label or "", pending=args.pending)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        state = "pending" if args.pending else "approved"
+        if args.json:
+            print(json.dumps({"state": state, "record": rec, "path": str(PAIRING_LOCAL), "liveMutated": False}, indent=2))
+        else:
+            print(f"Added {state} device to {PAIRING_LOCAL}")
+            print(f"  device-id: {rec['device_id']}")
+            print(f"  client-id: {rec['client_id']}")
+            print("Live server config was not changed. Run `bin/clawbuddy pair snippet` if you need to paste config manually.")
+        return 0
+    if args.pair_cmd == "list":
+        status = pairing_status()
+        if args.json:
+            print(json.dumps(status, indent=2))
+        else:
+            print(f"pairing file: {status['path']}")
+            for section in ("approved", "pending"):
+                print(f"{section}:")
+                rows = status[section]
+                if not rows:
+                    print("  (none)")
+                for rec in rows:
+                    label = f"  {rec.get('label')}" if rec.get("label") else ""
+                    print(f"  - device-id={rec.get('device_id')} client-id={rec.get('client_id')}{label}")
+        return 0
+    if args.pair_cmd == "snippet":
+        print(pairing_snippet(), end="")
+        return 0
+    print("Choose: add, list, or snippet", file=sys.stderr)
+    return 2
 
 def cmd_status(args: argparse.Namespace) -> int:
     data = product_status(include_live=args.live)
@@ -194,7 +314,6 @@ def cmd_status(args: argparse.Namespace) -> int:
         print_status(data)
     return 0 if data["profileValid"] and data["separationOk"] else 1
 
-
 def cmd_init(args: argparse.Namespace) -> int:
     if RUNTIME_LOCAL.exists() and not args.force:
         print(f"Already exists: {RUNTIME_LOCAL}")
@@ -202,7 +321,6 @@ def cmd_init(args: argparse.Namespace) -> int:
     save_json(RUNTIME_LOCAL, load_json(RUNTIME_EXAMPLE))
     print(f"Created {RUNTIME_LOCAL}")
     return 0
-
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="clawbuddy", description="ClawBuddy product CLI")
@@ -222,16 +340,27 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_tune)
 
+    sp = sub.add_parser("pair", help="Pair/allowlist a ClawBuddy device locally; does not mutate live services")
+    pair_sub = sp.add_subparsers(dest="pair_cmd", required=True)
+    pair_add = pair_sub.add_parser("add", help="Approve a device-id/client-id pair")
+    pair_add.add_argument("device_id", help="Device-Id MAC address from setup page, serial logs, or OTA 403 logs")
+    pair_add.add_argument("client_id", help="Client-Id UUID from setup page, serial logs, or OTA 403 logs")
+    pair_add.add_argument("--label", help="Optional human label, e.g. kitchen prototype")
+    pair_add.add_argument("--pending", action="store_true", help="Record as pending instead of approved")
+    pair_add.add_argument("--json", action="store_true")
+    pair_list = pair_sub.add_parser("list", help="Show pending/approved devices")
+    pair_list.add_argument("--json", action="store_true")
+    pair_sub.add_parser("snippet", help="Print a YAML server.auth allowlist snippet to paste into server config")
+    sp.set_defaults(func=cmd_pair)
+
     sp = sub.add_parser("init", help="Create runtime.local.json from example")
     sp.add_argument("--force", action="store_true")
     sp.set_defaults(func=cmd_init)
     return p
 
-
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     return int(args.func(args))
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

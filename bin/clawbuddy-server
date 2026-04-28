@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Tiny ClawBuddy product status server.
+"""Tiny ClawBuddy product status + pairing server.
 
 This is intentionally local-only and separate from the live prototype bridge.
-It exposes status JSON for a future dashboard/plugin without touching live services.
+It exposes status JSON and a local pairing helper without touching live services.
 """
 from __future__ import annotations
 
+import html
 import importlib.machinery
 import importlib.util
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs
 
 ROOT = Path(__file__).resolve().parents[1]
 CLAWBUDDY_CLI = ROOT / "bin" / "clawbuddy"
@@ -26,8 +28,63 @@ HOST = "127.0.0.1"
 DEFAULT_PORT = 8199
 
 
+def pairing_html(message: str = "") -> str:
+    status = clawbuddy.pairing_status()
+    rows = []
+    for section in ("approved", "pending"):
+        items = status[section]
+        if not items:
+            rows.append(f"<h2>{section.title()}</h2><p class='muted'>None yet.</p>")
+            continue
+        lis = "".join(
+            "<li><code>{device}</code><br><code>{client}</code>{label}</li>".format(
+                device=html.escape(rec.get("device_id", "")),
+                client=html.escape(rec.get("client_id", "")),
+                label=("<br>" + html.escape(rec.get("label", ""))) if rec.get("label") else "",
+            )
+            for rec in items
+        )
+        rows.append(f"<h2>{section.title()}</h2><ul>{lis}</ul>")
+    escaped_message = f"<p class='ok'>{html.escape(message)}</p>" if message else ""
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ClawBuddy Pairing</title>
+  <style>
+    body {{ font: 16px system-ui, sans-serif; margin: 2rem; max-width: 860px; line-height: 1.45; }}
+    input {{ width: 100%; box-sizing: border-box; padding: .65rem; margin: .25rem 0 1rem; font: inherit; }}
+    button {{ padding: .7rem 1rem; font: inherit; cursor: pointer; }}
+    code, pre {{ background: #f5f5f5; padding: .15rem .25rem; border-radius: 4px; }}
+    pre {{ padding: 1rem; overflow: auto; }}
+    .muted {{ color: #666; }} .ok {{ color: #146c2e; font-weight: 650; }} .warn {{ color: #8a5a00; }}
+  </style>
+</head>
+<body>
+  <h1>Pair a ClawBuddy device</h1>
+  <p>This page is local-only at <code>127.0.0.1</code>. It writes a local allowlist file and never exposes pairing through Funnel.</p>
+  {escaped_message}
+  <form method="post" action="/pair">
+    <label>Device-Id (Wi-Fi MAC)</label>
+    <input name="device_id" placeholder="aa:bb:cc:dd:ee:ff" required autocomplete="off">
+    <label>Client-Id (UUID)</label>
+    <input name="client_id" placeholder="00000000-0000-4000-8000-000000000000" required autocomplete="off">
+    <label>Label (optional)</label>
+    <input name="label" placeholder="kitchen prototype" autocomplete="off">
+    <button type="submit">Approve device</button>
+  </form>
+  {''.join(rows)}
+  <h2>Server config snippet</h2>
+  <p class="warn">Live server config is not mutated automatically. Paste/merge this under your server config if your runtime does not read the local allowlist file directly.</p>
+  <pre>{html.escape(status['configSnippet'])}</pre>
+  <p class="muted">CLI alternative: <code>bin/clawbuddy pair add &lt;device-id&gt; &lt;client-id&gt;</code></p>
+</body>
+</html>"""
+
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "ClawBuddyStatus/0.1"
+    server_version = "ClawBuddyStatus/0.2"
 
     def log_message(self, fmt: str, *args):  # keep launchd logs quiet
         return
@@ -41,9 +98,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_html(self, body: str, status=200):
+        data = body.encode()
+        self.send_response(status)
+        self.send_header("content-type", "text/html; charset=utf-8")
+        self.send_header("cache-control", "no-store")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         if self.path in ("/", "/health"):
-            self.send_json({"ok": True, "product": "ClawBuddy", "port": self.server.server_port})
+            self.send_json({"ok": True, "product": "ClawBuddy", "port": self.server.server_port, "pairing": "/pair"})
             return
         if self.path == "/status":
             self.send_json(clawbuddy.product_status(include_live=False))
@@ -54,7 +120,33 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/profiles":
             self.send_json(clawbuddy.profile_data())
             return
+        if self.path == "/pair":
+            self.send_html(pairing_html())
+            return
+        if self.path == "/pair.json":
+            self.send_json(clawbuddy.pairing_status())
+            return
         self.send_json({"ok": False, "error": "not_found"}, status=404)
+
+    def do_POST(self):
+        if self.path != "/pair":
+            self.send_json({"ok": False, "error": "not_found"}, status=404)
+            return
+        length = int(self.headers.get("content-length", "0"))
+        if length > 4096:
+            self.send_html(pairing_html("Form was too large."), status=400)
+            return
+        form = parse_qs(self.rfile.read(length).decode())
+        try:
+            rec = clawbuddy.add_pairing(
+                form.get("device_id", [""])[0],
+                form.get("client_id", [""])[0],
+                form.get("label", [""])[0],
+            )
+        except ValueError as exc:
+            self.send_html(pairing_html(str(exc)), status=400)
+            return
+        self.send_html(pairing_html(f"Approved {rec['device_id']} / {rec['client_id']}"))
 
 
 def main(argv=None):
@@ -62,6 +154,7 @@ def main(argv=None):
     port = int(argv[0]) if argv else DEFAULT_PORT
     server = ThreadingHTTPServer((HOST, port), Handler)
     print(f"clawbuddy status server listening on http://{HOST}:{port}", flush=True)
+    print(f"pairing helper: http://{HOST}:{port}/pair", flush=True)
     server.serve_forever()
 
 

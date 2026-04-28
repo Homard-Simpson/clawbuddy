@@ -25,7 +25,6 @@ Use placeholders below:
 - `<your-tailnet-host>`: your Tailscale DNS name, for example `your-mac.your-tailnet.ts.net`
 - `<https-port>`: the HTTPS port you expose, for example `10000`
 
-
 ## Pairing and security: public route, private access
 
 Tailscale Funnel makes a small HTTPS doorway reachable from the internet. That does **not** mean every device can talk to ClawBuddy or OpenClaw.
@@ -45,6 +44,44 @@ Why this is good:
 - New devices must be deliberately paired/approved before they can reach Claw/OpenClaw.
 
 Keep this rule: expose only the ESP-required paths, then pair/allowlist the actual devices you trust.
+
+## How to pair a new device
+
+Pairing is deliberately **not** exposed through Tailscale Funnel. Do it locally or over a private tailnet/admin session on the server machine.
+
+1. Find the device identity:
+   - Open the device setup portal (`http://192.168.4.1`) and check **Advanced → Device identity for pairing**.
+   - Or watch USB serial / OTA `403 forbidden` logs for `Device-Id` and `Client-Id`.
+2. On the server machine, start the local helper:
+
+   ```bash
+   bin/clawbuddy-server
+   ```
+
+3. Open the local page:
+
+   ```text
+   http://127.0.0.1:8199/pair
+   ```
+
+4. Paste `device-id` and `client-id`, then approve.
+5. If your runtime does not automatically consume `config/device-allowlist.local.json`, copy the snippet from the page or run:
+
+   ```bash
+   bin/clawbuddy pair snippet
+   ```
+
+   Paste/merge it into the server config under `server.auth`.
+6. Retry OTA from the device.
+
+CLI-only version:
+
+```bash
+bin/clawbuddy pair add aa:bb:cc:dd:ee:ff 00000000-0000-4000-8000-000000000000 --label "my ClawBuddy"
+bin/clawbuddy pair list
+```
+
+Paired means both the Wi-Fi MAC `device-id` and firmware UUID `client-id` are approved. Unpaired means OTA should return `403 forbidden` and withhold websocket config, tokens, and firmware download access.
 
 ## Recommended routing
 

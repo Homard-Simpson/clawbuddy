@@ -269,6 +269,18 @@
                 <h3 data-lang="advanced_tab">Advanced</h3>
                 <p class="error" style="color: red; text-align: center;" id="advanced_error"></p>
                 
+
+                <!-- Pairing identity -->
+                <p>
+                    <label>Device identity for pairing:</label>
+                    <div style="background:#f7f7f7;border:1px solid #ddd;border-radius:4px;padding:10px;line-height:1.5;">
+                        <div>Device-Id: <code id="pair_device_id">loading…</code></div>
+                        <div>Client-Id: <code id="pair_client_id">loading…</code></div>
+                        <button type="button" onclick="copyPairingIdentity()" style="margin-top:8px;padding:5px 10px;border:1px solid #ccc;border-radius:3px;background-color:#f0f0f0;cursor:pointer;">Copy pairing IDs</button>
+                    </div>
+                    <small style="display:block;margin-top:4px;color:#666;">Approve these IDs on your local ClawBuddy server. They are identifiers, not passwords.</small>
+                </p>
+
                 <!-- OTA URL -->
                 <p>
                     <label for="ota_url" data-lang="ota_url">Custom OTA URL:</label>
@@ -1442,6 +1454,40 @@
         }
 
         /**
+         * Load safe public identity values needed for server pairing.
+         */
+        async function loadPairingIdentity() {
+            try {
+                const response = await fetch('/identity');
+                const data = await response.json();
+                document.getElementById('pair_device_id').textContent = data.device_id || 'not available yet';
+                document.getElementById('pair_client_id').textContent = data.client_id || 'not available yet';
+            } catch (error) {
+                console.error('Error loading pairing identity:', error);
+                document.getElementById('pair_device_id').textContent = 'not available';
+                document.getElementById('pair_client_id').textContent = 'not available';
+            }
+        }
+
+        /**
+         * Copy pairing identity as CLI-ready text.
+         */
+        async function copyPairingIdentity() {
+            const deviceId = document.getElementById('pair_device_id').textContent;
+            const clientId = document.getElementById('pair_client_id').textContent;
+            const text = `device-id: ${deviceId}
+client-id: ${clientId}
+
+bin/clawbuddy pair add ${deviceId} ${clientId}`;
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('Pairing IDs copied');
+            } catch (error) {
+                showToast(text);
+            }
+        }
+
+        /**
          * Clear OTA URL input field
          */
         function clearOtaUrl() {
@@ -1471,6 +1517,7 @@
             loadSavedList();
             loadAPList();
             loadAdvancedConfig();
+            loadPairingIdentity();
         });
 
         /**

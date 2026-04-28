@@ -49,6 +49,21 @@ bool IsWebSocketUrlOrBlank(const std::string& value) {
     return value.empty() || value.rfind("ws://", 0) == 0 || value.rfind("wss://", 0) == 0;
 }
 
+std::string GetWifiStaMacAddress() {
+    uint8_t mac[6];
+    esp_err_t err = esp_wifi_get_mac(WIFI_IF_STA, mac);
+    if (err != ESP_OK) {
+        err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    }
+    if (err != ESP_OK) {
+        return "";
+    }
+    char mac_str[18];
+    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    return std::string(mac_str);
+}
+
 std::string LoadNvsString(const char* ns, const char* key) {
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(ns, NVS_READONLY, &nvs);
@@ -576,6 +591,37 @@ void WifiConfigurationAp::StartWebServer()
         };
         ESP_ERROR_CHECK(httpd_register_uri_handler(server_, &redirect_uri));
     }
+
+    // Register /identity so the setup page can show the safe public IDs needed for pairing.
+    httpd_uri_t identity = {
+        .uri = "/identity",
+        .method = HTTP_GET,
+        .handler = [](httpd_req_t *req) -> esp_err_t {
+            cJSON *json = cJSON_CreateObject();
+            if (!json) {
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create JSON");
+                return ESP_FAIL;
+            }
+
+            cJSON_AddStringToObject(json, "device_id", GetWifiStaMacAddress().c_str());
+            cJSON_AddStringToObject(json, "client_id", LoadNvsString("board", "uuid").c_str());
+            cJSON_AddStringToObject(json, "note", "These identifiers are for pairing; they are not passwords.");
+
+            char *json_str = cJSON_PrintUnformatted(json);
+            cJSON_Delete(json);
+            if (!json_str) {
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to print JSON");
+                return ESP_FAIL;
+            }
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_set_hdr(req, "Connection", "close");
+            httpd_resp_send(req, json_str, strlen(json_str));
+            free(json_str);
+            return ESP_OK;
+        },
+        .user_ctx = this
+    };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server_, &identity));
 
     // Register the /advanced/config URI
     httpd_uri_t advanced_config = {

@@ -132,6 +132,62 @@ What this does:
 
 The server binds to `127.0.0.1` by default, so it is only reachable from your own computer.
 
+## Pair a device (simple prototype flow)
+
+A ClawBuddy device is **unpaired** until its public identity is approved by the server allowlist. Unpaired devices get `403 forbidden` from OTA and do not receive websocket/server settings. A **paired** device has both values approved:
+
+- `device-id`: the device Wi-Fi MAC address, for example `aa:bb:cc:dd:ee:ff`
+- `client-id`: the firmware UUID, for example `00000000-0000-4000-8000-000000000000`
+
+These are identifiers, not passwords. Do not publish real ones in issues or docs.
+
+### Easiest local pairing page
+
+Run this on the Mac/Linux machine that owns the ClawBuddy server config:
+
+```bash
+bin/clawbuddy-server
+```
+
+Open:
+
+```text
+http://127.0.0.1:8199/pair
+```
+
+Paste the device-id and client-id, add an optional label, then click **Approve device**. The page is bound to `127.0.0.1` only; do not expose it through Tailscale Funnel.
+
+The pairing helper writes:
+
+```text
+config/device-allowlist.local.json
+```
+
+That local file is git-ignored. If your server does not read that file directly yet, copy the YAML shown on the page into your server config under `server.auth`.
+
+### CLI pairing
+
+You can do the same thing without a browser:
+
+```bash
+bin/clawbuddy pair add aa:bb:cc:dd:ee:ff 00000000-0000-4000-8000-000000000000 --label "desk prototype"
+bin/clawbuddy pair list
+bin/clawbuddy pair snippet
+```
+
+- `pair add` approves the device locally.
+- `pair list` shows approved and pending records.
+- `pair snippet` prints the exact `server.auth.allowed_devices` / `allowed_clients` YAML to paste into a compatible server config.
+
+### Where to find the IDs
+
+Try these in order:
+
+1. On current firmware, open the setup portal at `http://192.168.4.1`, go to **Advanced**, and copy **Device identity for pairing**.
+2. With USB attached, watch the serial monitor while the device boots or calls OTA. The firmware logs a `UUID=...`; the OTA request uses headers `Device-Id` and `Client-Id`.
+3. If OTA reaches the server but is rejected, check the OTA rejection/403 logs. They should include the attempted device-id/client-id pair.
+4. Fallback: `device-id` is the Wi-Fi STA MAC address; `client-id` is the board UUID stored in device NVS and may change if NVS is erased.
+
 ## Full setup: build and flash firmware
 
 ### 1. Install ESP-IDF
@@ -199,7 +255,6 @@ After flashing:
 
 For public prototypes, avoid putting secrets, personal hostnames, or private network names in committed files.
 
-
 ## Make it work anywhere with Tailscale
 
 If you want ClawBuddy to work outside your home network, use Tailscale Funnel/Serve on the Mac or server that runs OpenClaw.
@@ -219,7 +274,6 @@ Read the full guide: [`docs/TAILSCALE_SETUP.md`](docs/TAILSCALE_SETUP.md).
 Security model in one sentence: **Tailscale Funnel makes the ClawBuddy doorway reachable, but only paired/approved devices get the keys.**
 
 During OTA, the device sends `device-id` and `client-id`; the server checks those against its allowlist. Unknown devices get `403 forbidden` and do not receive firmware download access or websocket/server config.
-
 
 The OTA URL to build into firmware looks like this:
 
