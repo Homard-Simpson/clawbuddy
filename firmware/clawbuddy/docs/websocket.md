@@ -314,6 +314,7 @@ WebSocket 文本帧以 JSON 方式传输，以下为常见的 `"type"` 字段及
 
 2. **Connecting** → **Listening**  
    - 成功建立连接后，若继续执行 `SendStartListening(...)`，则进入录音状态。此时设备会持续编码麦克风数据并发送到服务器。  
+   - ClawBuddy push-to-talk/manual listening sends `"response_mode":"text"` on listen start and also suppresses incoming TTS audio locally for that turn; the assistant text still displays on screen.
 
 3. **Listening** → **Speaking**  
    - 收到服务器 TTS Start 消息 (`{"type":"tts","state":"start"}`) → 停止录音并播放接收到的音频。  

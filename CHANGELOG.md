@@ -1,5 +1,11 @@
 # ClawBuddy Changelog
 
+## 2026-04-28 — PTT text-only replies
+
+- Bumped firmware to `0.1.6-clawbuddy` for OTA testing.
+- Push-to-talk/manual listening still captures immediately and sends on release, but now requests a text response and locally drops TTS audio for that PTT turn.
+- Normal non-PTT listening and wake-word reply audio remain unchanged.
+
 ## 2026-04-25
 
 - Captured live upstream prototype voice-input improvement as a ClawBuddy product requirement.

@@ -54,7 +54,7 @@ void Protocol::SendWakeWordDetected(const std::string& wake_word) {
     SendText(json);
 }
 
-void Protocol::SendStartListening(ListeningMode mode) {
+void Protocol::SendStartListening(ListeningMode mode, bool text_only_response) {
     std::string message = "{\"session_id\":\"" + session_id_ + "\"";
     message += ",\"type\":\"listen\",\"state\":\"start\"";
     if (mode == kListeningModeRealtime) {
@@ -63,6 +63,9 @@ void Protocol::SendStartListening(ListeningMode mode) {
         message += ",\"mode\":\"auto\"";
     } else {
         message += ",\"mode\":\"manual\"";
+    }
+    if (text_only_response) {
+        message += ",\"response_mode\":\"text\"";
     }
     message += "}";
     SendText(message);

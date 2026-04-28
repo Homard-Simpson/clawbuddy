@@ -495,6 +495,10 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
+        if (ptt_text_only_response_pending_ || ptt_text_only_response_active_) {
+            ESP_LOGD(TAG, "Dropping incoming TTS audio for PTT text-only response");
+            return;
+        }
         if (GetDeviceState() == kDeviceStateSpeaking) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
@@ -513,6 +517,9 @@ void Application::InitializeProtocol() {
         Schedule([this]() {
             pending_ptt_capture_ = false;
             ptt_stop_requested_ = false;
+            ptt_text_only_response_requested_ = false;
+            ptt_text_only_response_pending_ = false;
+            ptt_text_only_response_active_ = false;
             listening_start_sent_ = false;
             audio_channel_open_in_progress_ = false;
             auto display = Board::GetInstance().GetDisplay();
@@ -527,13 +534,30 @@ void Application::InitializeProtocol() {
         if (strcmp(type->valuestring, "tts") == 0) {
             auto state = cJSON_GetObjectItem(root, "state");
             if (strcmp(state->valuestring, "start") == 0) {
-                Schedule([this]() {
+                bool text_only_response = ptt_text_only_response_pending_ || ptt_text_only_response_active_;
+                if (ptt_text_only_response_pending_) {
+                    ptt_text_only_response_pending_ = false;
+                    ptt_text_only_response_active_ = true;
+                    ESP_LOGI(TAG, "PTT text-only response started; suppressing TTS playback");
+                }
+                Schedule([this, text_only_response]() {
                     aborted_ = false;
-                    SetDeviceState(kDeviceStateSpeaking);
+                    if (!text_only_response) {
+                        SetDeviceState(kDeviceStateSpeaking);
+                    }
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
-                Schedule([this]() {
-                    if (GetDeviceState() == kDeviceStateSpeaking) {
+                bool text_only_response = ptt_text_only_response_active_;
+                if (ptt_text_only_response_active_) {
+                    ptt_text_only_response_active_ = false;
+                    ESP_LOGI(TAG, "PTT text-only response finished");
+                }
+                Schedule([this, text_only_response]() {
+                    if (text_only_response) {
+                        if (GetDeviceState() == kDeviceStateListening || GetDeviceState() == kDeviceStateSpeaking) {
+                            SetDeviceState(kDeviceStateIdle);
+                        }
+                    } else if (GetDeviceState() == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
                         } else {
@@ -697,6 +721,7 @@ void Application::HandleToggleChatEvent() {
 
     if (state == kDeviceStateIdle) {
         ListeningMode mode = GetDefaultListeningMode();
+        ptt_text_only_response_requested_ = false;
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
             // Schedule to let the state change be processed first (UI update)
@@ -769,6 +794,7 @@ void Application::HandleStartListeningEvent() {
         listening_mode_ = kListeningModeManualStop;
         listening_start_sent_ = false;
         ptt_stop_requested_ = false;
+        ptt_text_only_response_requested_ = true;
         pending_ptt_capture_ = !protocol_->IsAudioChannelOpened();
 
         // Start microphone capture/UI immediately on button-down. If the
@@ -784,6 +810,7 @@ void Application::HandleStartListeningEvent() {
         FlushPendingPttIfReady();
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
+        ptt_text_only_response_requested_ = true;
         SetListeningMode(kListeningModeManualStop);
     }
 }
@@ -803,6 +830,8 @@ void Application::HandleStopListeningEvent() {
             return;
         }
         if (protocol_) {
+            ptt_text_only_response_pending_ = ptt_text_only_response_requested_;
+            ptt_text_only_response_requested_ = false;
             protocol_->SendStopListening();
         }
         listening_start_sent_ = false;
@@ -868,6 +897,8 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
             return;
         }
     }
+
+    ptt_text_only_response_requested_ = false;
 
     ESP_LOGI(TAG, "Wake word detected: %s", wake_word.c_str());
 #if CONFIG_SEND_WAKE_WORD_DATA
@@ -984,7 +1015,7 @@ bool Application::EnsureListeningSessionStarted() {
     if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
         return false;
     }
-    protocol_->SendStartListening(listening_mode_);
+    protocol_->SendStartListening(listening_mode_, ptt_text_only_response_requested_ && listening_mode_ == kListeningModeManualStop);
     listening_start_sent_ = true;
     return true;
 }
@@ -1015,6 +1046,8 @@ void Application::FinishPendingPttCapture() {
         return;
     }
     if (listening_start_sent_) {
+        ptt_text_only_response_pending_ = ptt_text_only_response_requested_;
+        ptt_text_only_response_requested_ = false;
         protocol_->SendStopListening();
     }
     pending_ptt_capture_ = false;
@@ -1033,6 +1066,9 @@ void Application::AbortSpeaking(AbortReason reason) {
 
 void Application::SetListeningMode(ListeningMode mode) {
     listening_mode_ = mode;
+    if (mode != kListeningModeManualStop) {
+        ptt_text_only_response_requested_ = false;
+    }
     listening_start_sent_ = false;
     SetDeviceState(kDeviceStateListening);
 }

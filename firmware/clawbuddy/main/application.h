@@ -142,6 +142,9 @@ private:
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     bool pending_ptt_capture_ = false;      // Local PTT audio captured before transport/session is ready
     bool ptt_stop_requested_ = false;       // Button released; send buffered audio then stop when possible
+    bool ptt_text_only_response_requested_ = false; // Current PTT turn should receive text-only response
+    bool ptt_text_only_response_pending_ = false;   // Suppress the next TTS/audio response from PTT
+    bool ptt_text_only_response_active_ = false;    // Currently dropping TTS audio for a PTT response
     bool listening_start_sent_ = false;     // Server has received listen start for current capture
     bool audio_channel_open_in_progress_ = false;
     int clock_ticks_ = 0;

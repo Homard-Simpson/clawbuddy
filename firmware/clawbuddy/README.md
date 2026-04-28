@@ -7,6 +7,7 @@ This codebase began as a fork of an ESP32 voice-assistant firmware stack, but th
 - English-first UI and docs.
 - ClawBuddy branding, not upstream demo branding.
 - Push-to-talk and normal listening modes on the BOOT button.
+- Push-to-talk/manual replies are text-only on screen; normal chat replies still play voice audio.
 - OpenClaw-oriented OTA, provisioning, and assistant bridge integration.
 - No hard-coded personal hostnames, device IDs, tokens, or home-network assumptions.
 
