@@ -40,7 +40,7 @@ Status JSON:
 - Snapshot: `/capture`
 - Stream: `:81/stream`
 
-## OpenClaw/Xiaozhi integration
+## OpenClaw / ClawBuddy integration
 
 `mcp_self_tools_server.py` tries LAN/mDNS first:
 

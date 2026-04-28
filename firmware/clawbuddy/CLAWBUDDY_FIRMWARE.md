@@ -1,6 +1,8 @@
 # ClawBuddy ESP32 Firmware
 
-Fork of the Xiaozhi ESP32 firmware for the Waveshare ESP32-S3 Touch AMOLED 1.8 target.
+ClawBuddy ESP32 firmware for the Waveshare ESP32-S3 Touch AMOLED 1.8 target.
+
+This codebase is derived from the upstream Xiaozhi ESP32 firmware. Some internal Kconfig symbols, component names, wake-word model names, and protocol routes still contain `xiaozhi` for upstream/server compatibility and should not be renamed unless the matching upstream component or server route is changed at the same time.
 
 Product requirements:
 
@@ -21,4 +23,4 @@ The Waveshare ESP32-S3 Touch AMOLED 1.8 board registers these device-side MCP to
 
 This is intentionally direct ESP-to-ESP over Wi-Fi. The existing server-side describe/vision path remains separate.
 
-Live Xiaozhi runtime is not used or mutated by this fork.
+Live legacy Xiaozhi/OpenClaw services are not used or mutated by firmware repo work.

@@ -4,7 +4,7 @@ This is the easiest public-prototype pattern if you want ClawBuddy to work away 
 
 Plain English version:
 
-- Your Mac/server runs OpenClaw + the ClawBuddy/Xiaozhi server.
+- Your Mac/server runs OpenClaw + the ClawBuddy server.
 - Tailscale Funnel gives that server a safe HTTPS address.
 - ClawBuddy connects to that HTTPS address from any normal Wi-Fi network.
 - The device does **not** need Tailscale installed.
@@ -69,47 +69,32 @@ https://your-mac.your-tailnet.ts.net:10000/xiaozhi/ota/
 
 ## Where the OTA URL comes from
 
-Today, the firmware checks the OTA URL in this order:
+The firmware checks the OTA URL in this order:
 
 1. A saved device setting named `ota_url` in the device's Wi-Fi/settings storage, if one exists.
 2. The build-time default `CONFIG_OTA_URL`, if no saved setting exists.
 
-For the public prototype, assume the reliable path is **build-time default**.
+Normal setup should use the setup page field, not firmware editing:
 
-That default is set in:
+1. Join the temporary `ClawBuddy-XXXX` Wi-Fi setup network.
+2. Open the captive portal or `http://192.168.4.1`.
+3. On **Advanced**, set **Custom OTA URL** to your Tailscale Funnel HTTPS URL.
+4. Leave it blank to fall back to the build-time default.
+
+The setup page validates that the OTA URL starts with `http://` or `https://`. A Tailscale Funnel example is:
 
 ```text
-firmware/clawbuddy/main/boards/waveshare/esp32-s3-touch-amoled-1.8/config.json
+https://your-clawbuddy-host.example.com/clawbuddy/ota/
 ```
 
-Look for:
+There is also an optional **Voice server WebSocket URL** override. Leave it blank unless you deliberately need to bypass the websocket/server config returned by OTA.
 
-```text
-CONFIG_OTA_URL="https://your-clawbuddy-host.example.com/clawbuddy/ota/"
-```
-
-Replace it with your Tailscale Funnel OTA URL before building firmware.
-
-## Is the OTA URL part of the ESP setup web page?
-
-Not currently in the normal user-friendly path.
-
-The first-time setup/provisioning flow is mainly for Wi-Fi credentials. The device then uses its OTA URL to ask the server for:
+The device uses its OTA URL to ask the server for:
 
 - whether new firmware is available
 - websocket server URL
 - activation/server config
 - optional asset updates
-
-So the practical setup order is:
-
-1. Decide your public/Tailscale OTA URL.
-2. Put that URL into the firmware build config.
-3. Build and flash firmware.
-4. On first boot, use the device setup flow to connect to Wi-Fi.
-5. The device calls the OTA URL and receives the websocket/server details.
-
-A future improvement should add a simple setup page field for OTA URL so builders do not need to edit firmware config.
 
 ## Security checklist
 
@@ -120,7 +105,7 @@ Before you rely on this outside your house:
 - Keep OTA POST allowlisted by device/client ID.
 - Use signed/expiring firmware download URLs.
 - Do not publish real device IDs, hostnames, tokens, or private URLs in docs/issues.
-- If you change the public URL, rebuild or update the saved `ota_url` setting on the device.
+- If you change the public URL, update the setup page's saved `ota_url` setting or rebuild with a new `CONFIG_OTA_URL` default.
 
 ## Quick troubleshooting
 
@@ -130,7 +115,7 @@ Check that your OTA URL uses `https://...`, not a LAN IP like `http://192.168.x.
 
 ### OTA works but voice does not connect
 
-The OTA server may be reachable, but the websocket route may be missing. Check `tailscale serve status` and confirm `/xiaozhi/v1/` reaches the local websocket server.
+The OTA server may be reachable, but the websocket route may be missing. Check `tailscale serve status` and confirm `/xiaozhi/v1/` reaches the local websocket server. That route name is retained for firmware/server protocol compatibility for now.
 
 ### Browser can open OTA, but the ESP cannot update
 
@@ -138,4 +123,4 @@ Check the OTA allowlist. The server may reject unknown `device-id` / `client-id`
 
 ### You changed the Tailscale URL
 
-Rebuild firmware with the new `CONFIG_OTA_URL`, or update the device's saved `ota_url` setting if your build/setup path supports that.
+Re-open the setup page and update **Custom OTA URL**, or rebuild firmware with the new `CONFIG_OTA_URL` if you want to change the fallback default.

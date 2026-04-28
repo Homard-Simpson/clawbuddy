@@ -221,13 +221,14 @@ The OTA URL to build into firmware looks like this:
 https://<your-tailnet-host>:<https-port>/xiaozhi/ota/
 ```
 
-For the current prototype, set that as `CONFIG_OTA_URL` before building firmware. The config lives here:
+For normal setup, enter that URL on the device setup page:
 
-```text
-firmware/clawbuddy/main/boards/waveshare/esp32-s3-touch-amoled-1.8/config.json
-```
+1. Join the temporary `ClawBuddy-XXXX` Wi‑Fi setup network.
+2. Open the captive portal or `http://192.168.4.1`.
+3. On **Advanced**, set **Custom OTA URL** to your Tailscale Funnel HTTPS URL, for example `https://your-clawbuddy-host.example.com/clawbuddy/ota/`.
+4. Leave it blank to use the firmware build default.
 
-First-time Wi‑Fi setup gets the device onto Wi‑Fi. The OTA URL is not currently a normal friendly setup-page field; it is mainly a firmware build setting, with an advanced saved-device `ota_url` override if one already exists.
+The optional **Voice server WebSocket URL** field is only for manual overrides; normally the OTA response supplies websocket/server details. Compatibility routes such as `/xiaozhi/ota/` and `/xiaozhi/v1/` may still be used by the server while firmware/server protocol compatibility is maintained.
 
 ## Optional HT-HC33 vision camera
 
