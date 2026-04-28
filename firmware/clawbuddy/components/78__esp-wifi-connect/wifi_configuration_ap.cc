@@ -962,7 +962,7 @@ void WifiConfigurationAp::SmartConfigEventHandler(void *arg, esp_event_base_t ev
             char ssid[32], password[64];
             memcpy(ssid, evt->ssid, sizeof(evt->ssid));
             memcpy(password, evt->password, sizeof(evt->password));
-            ESP_LOGI(TAG, "SmartConfig SSID: %s, Password: %s", ssid, password);
+            ESP_LOGI(TAG, "SmartConfig SSID: %s (password redacted)", ssid);
             // 尝试连接WiFi会失败，故不连接
             self->Save(ssid, password);
             // 延迟退出配网模式

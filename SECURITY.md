@@ -6,7 +6,7 @@ ClawBuddy is currently a public prototype. Do not deploy it as a production or u
 
 ## Reporting vulnerabilities
 
-If you find a vulnerability, please open a private security advisory if this repository is hosted on GitHub, or contact the maintainers through the private OpenClaw project channel. Please avoid posting exploit details publicly until a fix is available.
+If you find a vulnerability, please open a private security advisory on GitHub when available. If advisories are not available, open a minimal public issue that says you have a security concern without exploit details. Please avoid posting exploit details publicly until a fix is available.
 
 ## Secrets and credentials
 

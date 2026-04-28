@@ -80,12 +80,12 @@ You also need:
 Copy/paste:
 
 ```bash
-git clone <repo-url> clawbuddy && cd clawbuddy && make test
+git clone https://github.com/Homard-Simpson/clawbuddy.git clawbuddy && cd clawbuddy && make test
 ```
 
 What this does:
 
-- `git clone <repo-url> clawbuddy` downloads this repo into a folder named `clawbuddy`.
+- `git clone https://github.com/Homard-Simpson/clawbuddy.git clawbuddy` downloads this repo into a folder named `clawbuddy`.
 - `cd clawbuddy` moves your terminal into that folder.
 - `make test` checks that the local Python tools can run and produce valid JSON.
 
