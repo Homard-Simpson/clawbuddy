@@ -1,10 +1,21 @@
+<p align="center">
+  <img src="docs/branding/assets/clawbuddy-logo.svg" alt="ClawBuddy — Your OpenClaw companion, always within reach" width="560">
+</p>
+
+<p align="center">
+  <a href="docs/branding/README.md"><img alt="Brand kit" src="https://img.shields.io/badge/brand-kit-3056D3?style=flat-square"></a>
+  <img alt="Prototype status" src="https://img.shields.io/badge/status-public--prototype-2DD4BF?style=flat-square">
+  <img alt="Target hardware" src="https://img.shields.io/badge/ESP32--S3-voice%20device-F59E0B?style=flat-square">
+  <img alt="Local-first" src="https://img.shields.io/badge/local--first-OpenClaw-0F172A?style=flat-square">
+</p>
+
 # ClawBuddy
 
-ClawBuddy is a small handheld voice device that connects to an OpenClaw agent.
+**Your OpenClaw companion, always within reach.**
 
-Think of it like a dedicated “talk to my assistant” button: you speak to the ESP32-S3 device, the device sends audio over Wi‑Fi to a ClawBuddy/OpenClaw server, OpenClaw does the useful work, and the answer comes back to the device.
+ClawBuddy is a small handheld voice device for reaching your OpenClaw agent without opening a laptop or phone. Press, talk naturally, and let the ESP32-S3 prototype send your request over Wi‑Fi to a ClawBuddy/OpenClaw server; the answer comes back to the device.
 
-This repo is a **public prototype**. It is meant to be understandable, flashable, and safe to experiment with, but it is not a finished consumer product yet.
+This repo is the public-safe prototype workspace: firmware, local tools, setup docs, diagrams, and the [ClawBuddy brand kit](docs/branding/README.md) in one place. It is meant to be understandable, flashable, and safe to experiment with, but it is not a finished consumer product yet.
 
 ## What it does today
 
