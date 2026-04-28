@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">ClawBuddy logo mark</title>
+  <desc id="desc">A friendly portable device mark with a small claw-shaped signal and companion glow.</desc>
+  <defs>
+    <linearGradient id="shell" x1="54" y1="34" x2="202" y2="222" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#DBEAFE"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="76" y1="76" x2="180" y2="174" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3056D3"/>
+      <stop offset="1" stop-color="#2DD4BF"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="#0F172A"/>
+  <path d="M85 45h86c22 0 40 18 40 40v86c0 22-18 40-40 40H85c-22 0-40-18-40-40V85c0-22 18-40 40-40z" fill="url(#shell)" stroke="#CBD5E1" stroke-width="6"/>
+  <rect x="73" y="70" width="110" height="114" rx="28" fill="url(#screen)"/>
+  <circle cx="102" cy="118" r="9" fill="#F8FAFC"/>
+  <circle cx="154" cy="118" r="9" fill="#F8FAFC"/>
+  <path d="M103 150c15 13 35 13 50 0" fill="none" stroke="#F8FAFC" stroke-width="9" stroke-linecap="round"/>
+  <path d="M128 70V42" stroke="#2DD4BF" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="128" cy="34" r="10" fill="#2DD4BF"/>
+  <path d="M181 75c17 4 30 16 35 32" fill="none" stroke="#F59E0B" stroke-width="9" stroke-linecap="round"/>
+  <path d="M75 186c-14 0-25-11-25-25" fill="none" stroke="#3056D3" stroke-width="9" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="220" viewBox="0 0 720 220" role="img" aria-labelledby="title desc">
+  <title id="title">ClawBuddy logo</title>
+  <desc id="desc">ClawBuddy wordmark with a friendly portable companion logo mark.</desc>
+  <defs>
+    <linearGradient id="shell" x1="42" y1="30" x2="166" y2="190" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#DBEAFE"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="66" y1="66" x2="152" y2="154" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3056D3"/>
+      <stop offset="1" stop-color="#2DD4BF"/>
+    </linearGradient>
+    <style>
+      .word{font:800 64px Inter,system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:-2px;fill:#0F172A}.tag{font:500 22px Inter,system-ui,-apple-system,Segoe UI,sans-serif;fill:#475569}
+    </style>
+  </defs>
+  <rect width="720" height="220" rx="32" fill="#F8FAFC"/>
+  <g transform="translate(28 24)">
+    <path d="M61 18h84c21 0 38 17 38 38v84c0 21-17 38-38 38H61c-21 0-38-17-38-38V56c0-21 17-38 38-38z" fill="url(#shell)" stroke="#CBD5E1" stroke-width="5"/>
+    <rect x="51" y="48" width="104" height="108" rx="26" fill="url(#screen)"/>
+    <circle cx="80" cy="93" r="8" fill="#F8FAFC"/>
+    <circle cx="128" cy="93" r="8" fill="#F8FAFC"/>
+    <path d="M82 124c14 12 32 12 46 0" fill="none" stroke="#F8FAFC" stroke-width="8" stroke-linecap="round"/>
+    <path d="M104 48V22" stroke="#2DD4BF" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="104" cy="14" r="9" fill="#2DD4BF"/>
+    <path d="M153 52c15 4 27 15 32 29" fill="none" stroke="#F59E0B" stroke-width="8" stroke-linecap="round"/>
+    <path d="M53 158c-13 0-23-10-23-23" fill="none" stroke="#3056D3" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <text x="238" y="103" class="word">Claw<tspan fill="#3056D3">Buddy</tspan></text>
+  <text x="242" y="143" class="tag">Your OpenClaw companion, always within reach.</text>
+</svg>

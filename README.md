@@ -12,6 +12,7 @@ This repo is a **public prototype**. It is meant to be understandable, flashable
 - Provides a small local ClawBuddy CLI and status server.
 - Keeps ClawBuddy development separate from any production OpenClaw voice bridge.
 - Documents the planned device → server → OpenClaw flow, OTA updates, and optional vision camera setup.
+- Includes a lightweight public-safe [brand kit and logo assets](docs/branding/README.md) for docs, ads, and launch materials.
 
 ## How the pieces fit together
 
@@ -383,7 +384,7 @@ Check the camera serial monitor. The setup network name and password are printed
 - `hardware/` — target board notes.
 - `bridge/` — future standalone ClawBuddy server/bridge code.
 - `ops/` — security, ports, status contracts, and operational notes.
-- `docs/` — demos, handoff notes, and diagrams.
+- `docs/` — demos, handoff notes, diagrams, and the [ClawBuddy brand kit](docs/branding/README.md).
 
 ## Safety and privacy notes
 

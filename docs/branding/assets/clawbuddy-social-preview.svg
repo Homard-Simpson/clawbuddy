@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">ClawBuddy social preview</title>
+  <desc id="desc">A launch preview card for ClawBuddy with tagline and friendly portable companion mark.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0F172A"/>
+      <stop offset="0.58" stop-color="#1E3A8A"/>
+      <stop offset="1" stop-color="#0F766E"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="785" y1="170" x2="1030" y2="435" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3056D3"/>
+      <stop offset="1" stop-color="#2DD4BF"/>
+    </linearGradient>
+    <style>
+      .eyebrow{font:700 28px Inter,system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:.12em;fill:#2DD4BF}.headline{font:800 78px Inter,system-ui,-apple-system,Segoe UI,sans-serif;letter-spacing:-3px;fill:#F8FAFC}.body{font:500 32px Inter,system-ui,-apple-system,Segoe UI,sans-serif;fill:#DBEAFE}.pill{font:700 24px Inter,system-ui,-apple-system,Segoe UI,sans-serif;fill:#0F172A}
+    </style>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <circle cx="1048" cy="110" r="170" fill="#2DD4BF" opacity=".18"/>
+  <circle cx="864" cy="520" r="230" fill="#F59E0B" opacity=".12"/>
+  <text x="82" y="118" class="eyebrow">CLAWBUDDY</text>
+  <text x="82" y="226" class="headline">Your OpenClaw</text>
+  <text x="82" y="314" class="headline">companion.</text>
+  <text x="86" y="382" class="body">A handheld voice device for agent access</text>
+  <text x="86" y="424" class="body">without opening another app.</text>
+  <rect x="86" y="486" width="300" height="56" rx="28" fill="#F8FAFC"/>
+  <text x="123" y="522" class="pill">Prototype-ready docs</text>
+  <g transform="translate(760 128)">
+    <rect x="22" y="0" width="312" height="374" rx="72" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="8"/>
+    <rect x="72" y="68" width="212" height="234" rx="48" fill="url(#screen)"/>
+    <circle cx="130" cy="162" r="18" fill="#F8FAFC"/>
+    <circle cx="226" cy="162" r="18" fill="#F8FAFC"/>
+    <path d="M135 226c27 24 62 24 89 0" fill="none" stroke="#F8FAFC" stroke-width="17" stroke-linecap="round"/>
+    <path d="M178 68V16" stroke="#2DD4BF" stroke-width="17" stroke-linecap="round"/>
+    <circle cx="178" cy="0" r="20" fill="#2DD4BF"/>
+    <path d="M284 74c39 10 68 37 79 73" fill="none" stroke="#F59E0B" stroke-width="17" stroke-linecap="round"/>
+    <path d="M72 307c-29 0-52-23-52-52" fill="none" stroke="#3056D3" stroke-width="17" stroke-linecap="round"/>
+  </g>
+</svg>
