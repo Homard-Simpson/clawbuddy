@@ -8,6 +8,7 @@ Plain English version:
 - Tailscale Funnel gives that server a safe HTTPS address.
 - ClawBuddy connects to that HTTPS address from any normal Wi-Fi network.
 - The device does **not** need Tailscale installed.
+- Only paired/approved devices can actually use ClawBuddy. Random unpaired devices may see that an OTA endpoint exists, but they cannot receive firmware, websocket config, or reach the OpenClaw agent. That is the security win: public route, private access.
 
 ![Tailscale anywhere flow](assets/clawbuddy-tailscale-anywhere.svg)
 
@@ -23,6 +24,27 @@ Use placeholders below:
 
 - `<your-tailnet-host>`: your Tailscale DNS name, for example `your-mac.your-tailnet.ts.net`
 - `<https-port>`: the HTTPS port you expose, for example `10000`
+
+
+## Pairing and security: public route, private access
+
+Tailscale Funnel makes a small HTTPS doorway reachable from the internet. That does **not** mean every device can talk to ClawBuddy or OpenClaw.
+
+ClawBuddy uses a pairing/allowlist check at the OTA gateway:
+
+1. The ESP sends its `device-id` and `client-id` when it calls the OTA endpoint.
+2. The server checks those values against its approved device/client allowlist.
+3. If the device is approved, the server can return firmware update info, websocket config, and signed/expiring firmware download URLs.
+4. If the device is not approved, the server returns `403 forbidden` and does not give it the websocket URL/token or firmware download access.
+
+Why this is good:
+
+- You can use ClawBuddy anywhere without opening your whole network.
+- Dashboards/admin pages stay private or tailnet-only.
+- Losing the public URL is not enough to control your assistant.
+- New devices must be deliberately paired/approved before they can reach Claw/OpenClaw.
+
+Keep this rule: expose only the ESP-required paths, then pair/allowlist the actual devices you trust.
 
 ## Recommended routing
 
@@ -124,3 +146,7 @@ Check the OTA allowlist. The server may reject unknown `device-id` / `client-id`
 ### You changed the Tailscale URL
 
 Re-open the setup page and update **Custom OTA URL**, or rebuild firmware with the new `CONFIG_OTA_URL` if you want to change the fallback default.
+
+### OTA says `403 forbidden`
+
+That usually means the device is not paired/approved yet, or its `device-id` / `client-id` changed. This is expected security behavior. Add the device to the server allowlist, then retry.

@@ -210,10 +210,16 @@ Plain English:
 - Your Mac/server stays on Tailscale.
 - Tailscale gives the server an HTTPS address.
 - ClawBuddy calls that HTTPS OTA URL, then receives the websocket/server details from OTA.
+- Unpaired devices are rejected by the OTA allowlist, so a public Funnel URL does not mean public access to Claw/OpenClaw.
 
 ![ClawBuddy Tailscale anywhere flow](docs/assets/clawbuddy-tailscale-anywhere.svg)
 
 Read the full guide: [`docs/TAILSCALE_SETUP.md`](docs/TAILSCALE_SETUP.md).
+
+Security model in one sentence: **Tailscale Funnel makes the ClawBuddy doorway reachable, but only paired/approved devices get the keys.**
+
+During OTA, the device sends `device-id` and `client-id`; the server checks those against its allowlist. Unknown devices get `403 forbidden` and do not receive firmware download access or websocket/server config.
+
 
 The OTA URL to build into firmware looks like this:
 
