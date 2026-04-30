@@ -797,9 +797,9 @@ void Application::HandleStartListeningEvent() {
         listening_mode_ = kListeningModeManualStop;
         listening_start_sent_ = false;
         ptt_stop_requested_ = false;
-        // Manual/PTT turns should speak back normally. The previous text-only
-        // PTT path made the device look like it was not responding with audio.
-        ptt_text_only_response_requested_ = false;
+        // Manual button/PTT sends user audio but asks the server for a
+        // text-only response. Wake/realtime listening still gets normal voice.
+        ptt_text_only_response_requested_ = true;
         pending_ptt_capture_ = !protocol_->IsAudioChannelOpened();
 
         // Start microphone capture/UI immediately on button-down. If the
@@ -1026,7 +1026,13 @@ bool Application::EnsureListeningSessionStarted() {
     if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
         return false;
     }
-    protocol_->SendStartListening(listening_mode_, false);
+    bool text_only_response = ptt_text_only_response_requested_ && listening_mode_ == kListeningModeManualStop;
+    if (!text_only_response) {
+        // New normal voice session; discard any stale PTT text-only suppressor.
+        ptt_text_only_response_pending_ = false;
+        ptt_text_only_response_active_ = false;
+    }
+    protocol_->SendStartListening(listening_mode_, text_only_response);
     listening_start_sent_ = true;
     return true;
 }

@@ -26,6 +26,6 @@
     <path d="M153 52c15 4 27 15 32 29" fill="none" stroke="#F59E0B" stroke-width="8" stroke-linecap="round"/>
     <path d="M53 158c-13 0-23-10-23-23" fill="none" stroke="#3056D3" stroke-width="8" stroke-linecap="round"/>
   </g>
-  <text x="238" y="103" class="word">Claw<tspan fill="#3056D3">Buddy</tspan></text>
+  <text x="238" y="103" class="word">my<tspan fill="#3056D3">AI</tspan></text>
   <text x="242" y="143" class="tag">Your OpenClaw companion, always within reach.</text>
 </svg>

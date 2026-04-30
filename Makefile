@@ -1,4 +1,4 @@
-.PHONY: status live profiles test serve
+.PHONY: status live profiles test serve install install-build
 
 status:
 	bin/clawbuddy status
@@ -11,6 +11,12 @@ profiles:
 
 serve:
 	bin/clawbuddy-server
+
+install:
+	scripts/install-myai.sh
+
+install-build:
+	scripts/install-myai.sh --build
 
 test:
 	python3 -m py_compile bin/clawbuddy bin/clawbuddy-server

@@ -1,5 +1,13 @@
 # myAI Changelog
 
+## 2026-04-30 — PTT text-only OTA 0.1.16
+
+- Bumped firmware to `0.1.16-myai`.
+- Restored manual push-to-talk turns to request `response_mode: text` while wake/realtime voice still receives normal audio.
+- Staged OTA app binary under `firmware/clawbuddy/ota/v0.1.16-myai/`.
+- Added local OTA POST handling to `bin/clawbuddy-server` and verified it returns the staged `0.1.16-myai` payload.
+- Updated the README top logo SVG so it visually says `myAI` instead of `ClawBuddy`.
+
 ## 2026-04-30 — myAI loading polish
 
 - Bumped firmware to `0.1.14-myai`.
