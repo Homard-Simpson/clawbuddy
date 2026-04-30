@@ -278,23 +278,23 @@
                         <div>Client-Id: <code id="pair_client_id">loading…</code></div>
                         <button type="button" onclick="copyPairingIdentity()" style="margin-top:8px;padding:5px 10px;border:1px solid #ccc;border-radius:3px;background-color:#f0f0f0;cursor:pointer;">Copy pairing IDs</button>
                     </div>
-                    <small style="display:block;margin-top:4px;color:#666;">Approve these IDs on your local ClawBuddy server. They are identifiers, not passwords.</small>
+                    <small style="display:block;margin-top:4px;color:#666;">Approve these IDs on your local myAI server. They are identifiers, not passwords.</small>
                 </p>
 
                 <!-- OTA URL -->
                 <p>
                     <label for="ota_url" data-lang="ota_url">Custom OTA URL:</label>
                     <div style="display: flex; align-items: center; gap: 10px;">
-                        <input type="url" id="ota_url" name="ota_url" placeholder="https://your-clawbuddy-host.example.com/clawbuddy/ota/" style="flex: 1;">
+                        <input type="url" id="ota_url" name="ota_url" placeholder="https://your-myai-host.example.com/myai/ota/" style="flex: 1;">
                         <button type="button" onclick="clearOtaUrl()" style="padding: 5px 10px; border: 1px solid #ccc; border-radius: 3px; background-color: #f0f0f0; cursor: pointer;">❌</button>
                     </div>
-                    <small style="display:block;margin-top:4px;color:#666;">Use http(s). Example: a Tailscale Funnel URL ending in <code>/clawbuddy/ota/</code>. Leave blank to use the firmware default.</small>
+                    <small style="display:block;margin-top:4px;color:#666;">Use http(s). Example: a Tailscale Funnel URL ending in <code>/myai/ota/</code>. Leave blank to use the firmware default.</small>
                 </p>
 
                 <!-- WebSocket Server URL -->
                 <p>
                     <label for="websocket_url">Voice server WebSocket URL (optional):</label>
-                    <input type="text" id="websocket_url" name="websocket_url" placeholder="wss://your-clawbuddy-host.example.com/xiaozhi/v1/">
+                    <input type="text" id="websocket_url" name="websocket_url" placeholder="wss://your-myai-host.example.com/xiaozhi/v1/">
                     <small style="display:block;margin-top:4px;color:#666;">Usually supplied by the OTA server. Use only if you need a manual override; leave blank for OTA-provided server settings.</small>
                 </p>
 
@@ -1478,7 +1478,7 @@
             const text = `device-id: ${deviceId}
 client-id: ${clientId}
 
-bin/clawbuddy pair add ${deviceId} ${clientId}`;
+bin/myai pair add ${deviceId} ${clientId}`;
             try {
                 await navigator.clipboard.writeText(text);
                 showToast('Pairing IDs copied');

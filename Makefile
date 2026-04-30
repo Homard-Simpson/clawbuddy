@@ -18,3 +18,5 @@ test:
 	bin/clawbuddy profiles >/tmp/clawbuddy-profiles.txt
 	bin/clawbuddy status --json | python3 -m json.tool >/tmp/clawbuddy-status.json
 	bin/clawbuddy status --live --json | python3 -m json.tool >/tmp/clawbuddy-live-status.json
+	bin/clawbuddy vision list --no-scan --json | python3 -m json.tool >/tmp/clawbuddy-vision-cameras.json
+	bin/clawbuddy vision scene-prompt >/tmp/clawbuddy-vision-policy.txt

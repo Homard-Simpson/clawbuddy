@@ -148,12 +148,10 @@ public:
     }
 
     virtual void SetupUI() override {
-        // Call parent SetupUI() first to create all lvgl objects
+        // Call parent SetupUI() first to create all lvgl objects.
+        // The compact myAI layout keeps status text inside top_bar_ and intentionally
+        // does not create the old second-row status_bar_.
         SpiLcdDisplay::SetupUI();
-
-        DisplayLockGuard lock(this);
-        lv_obj_set_style_pad_left(status_bar_, LV_HOR_RES * 0.1, 0);
-        lv_obj_set_style_pad_right(status_bar_, LV_HOR_RES * 0.1, 0);
     }
 
     void ShowCameraLoading() {
@@ -242,7 +240,7 @@ private:
     static constexpr const char* kOpenClawVisionCaptureUrl = "http://openclaw-vision.local/capture";
     static constexpr const char* kOpenClawVisionCaptureMdnsUrl = "http://openclaw-vision.local/capture";
     static constexpr const char* kOpenClawVisionCaptureApUrl = "http://192.168.4.1/capture";
-    static constexpr const char* kOpenClawVisionPreviewPngUrl = "http://clawbuddy-vision-proxy.local:8766/camera-preview.rgb565";
+    static constexpr const char* kOpenClawVisionPreviewPngUrl = "http://myai-vision-proxy.local:8766/camera-preview.rgb565";
     static constexpr int kOpenClawVisionPreviewWidth = 80;
     static constexpr int kOpenClawVisionPreviewHeight = 60;
     static constexpr int kCameraSnapshotMaxBytes = 512 * 1024;
@@ -289,7 +287,7 @@ private:
     std::unique_ptr<LvglImage> DownloadCameraSnapshotUrl(const std::string& url, size_t* bytes_read = nullptr) {
         auto http = GetNetwork()->CreateHttp(3);
         http->SetTimeout(10000);
-        http->SetHeader("User-Agent", "ClawBuddy-OpenClaw-Vision/1.1");
+        http->SetHeader("User-Agent", "myAI-OpenClaw-Vision/1.1");
         if (!http->Open("GET", url)) {
             throw std::runtime_error("Failed to open camera URL: " + url);
         }

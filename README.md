@@ -317,6 +317,26 @@ Security note: shared development passwords are only for private bench testing. 
 
 See `camera/README.md` for camera-specific notes.
 
+### Multi-camera scene bundles
+
+ClawBuddy keeps a local OpenClaw Vision camera registry in `config/vision-cameras.local.json` when present, otherwise `config/vision-cameras.example.json`.
+
+Useful commands:
+
+```bash
+bin/clawbuddy vision list
+bin/clawbuddy vision capture
+bin/clawbuddy vision scene-prompt
+```
+
+The local status server also exposes:
+
+- `GET /vision/cameras` — configured/discovered camera health
+- `GET /vision/capture` — snapshot bundle from all reachable cameras
+- `GET /vision/policy` — scene-description policy
+
+Scene policy: use every successful camera image. Describe each camera separately unless multiple images are strongly likely to be different angles of the same scene; then give one combined scene description and mention the supporting camera labels. Call out unavailable cameras briefly.
+
 ## Troubleshooting
 
 ### `make test` fails with “python3: command not found”

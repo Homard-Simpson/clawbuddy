@@ -120,6 +120,15 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/profiles":
             self.send_json(clawbuddy.profile_data())
             return
+        if self.path == "/vision/cameras":
+            self.send_json(clawbuddy.vision_camera_payload(timeout=0.35, scan=True))
+            return
+        if self.path == "/vision/capture":
+            self.send_json(clawbuddy.capture_all_cameras(timeout=2.0, scan=True))
+            return
+        if self.path == "/vision/policy":
+            self.send_json({"scenePolicy": clawbuddy.scene_policy_text()})
+            return
         if self.path == "/pair":
             self.send_html(pairing_html())
             return

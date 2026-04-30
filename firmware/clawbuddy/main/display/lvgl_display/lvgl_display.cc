@@ -135,14 +135,18 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
     // Update time
     if (app.GetDeviceState() == kDeviceStateIdle) {
         if (last_status_update_time_ + std::chrono::seconds(10) < std::chrono::system_clock::now()) {
-            // Set status to clock "HH:MM"
+            // Set status to 12-hour clock "H:MM AM/PM"
             time_t now = time(NULL);
             struct tm* tm = localtime(&now);
             // Check if the we have already set the time
             if (tm->tm_year >= 2025 - 1900) {
                 char time_str[16];
-                strftime(time_str, sizeof(time_str), "%H:%M", tm);
-                SetStatus(time_str);
+                strftime(time_str, sizeof(time_str), "%l:%M %p", tm);
+                if (time_str[0] == ' ') {
+                    SetStatus(time_str + 1);
+                } else {
+                    SetStatus(time_str);
+                }
             } else {
                 ESP_LOGW(TAG, "System time is not set, tm_year: %d", tm->tm_year);
             }

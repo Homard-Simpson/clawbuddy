@@ -54,7 +54,7 @@ void WifiBoard::StartNetwork() {
 
     // Initialize WiFi manager
     WifiManagerConfig config;
-    config.ssid_prefix = "ClawBuddy";
+    config.ssid_prefix = "myAI";
     config.language = Lang::CODE;
     wifi_manager.Initialize(config);
 

@@ -1,0 +1,29 @@
+{
+  "schema": "clawbuddy.vision-cameras.v1",
+  "discovery": {
+    "enabled": true,
+    "scanConfiguredSubnets": true,
+    "defaultTimeoutSeconds": 1.0
+  },
+  "cameras": [
+    {
+      "id": "ht-hc33-openclaw-vision",
+      "label": "HT-HC33 OpenClaw Vision",
+      "model": "HT-HC33",
+      "endpoint": "http://openclaw-vision.local/capture",
+      "statusEndpoint": "http://openclaw-vision.local/status",
+      "enabled": true,
+      "tags": ["openclaw-vision", "prototype"]
+    },
+    {
+      "id": "xiao-esp32s3-sense-90706912ca58",
+      "label": "XIAO ESP32-S3 Sense OpenClaw Vision",
+      "model": "XIAO ESP32-S3 Sense",
+      "mac": "90:70:69:12:ca:58",
+      "endpoint": "http://192.168.50.62/capture",
+      "statusEndpoint": "http://192.168.50.62/status",
+      "enabled": true,
+      "tags": ["openclaw-vision", "xiao"]
+    }
+  ]
+}

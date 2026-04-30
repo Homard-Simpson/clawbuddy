@@ -27,7 +27,7 @@ void LcdDisplay::InitializeLcdThemes() {
     auto icon_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_ICON_FONT);
     auto large_icon_font = std::make_shared<LvglBuiltInFont>(&font_awesome_30_4);
 
-    // ClawBuddy light theme: clean, high-contrast, OpenClaw green accent.
+    // myAI light theme: clean, high-contrast, OpenClaw green accent.
     auto light_theme = new LvglTheme("light");
     light_theme->set_background_color(lv_color_hex(0xF8FAFC));
     light_theme->set_text_color(lv_color_hex(0x0B1220));
@@ -42,7 +42,7 @@ void LcdDisplay::InitializeLcdThemes() {
     light_theme->set_icon_font(icon_font);
     light_theme->set_large_icon_font(large_icon_font);
 
-    // ClawBuddy dark theme: AMOLED-friendly with a soft OpenClaw glow.
+    // myAI dark theme: AMOLED-friendly with a soft OpenClaw glow.
     auto dark_theme = new LvglTheme("dark");
     dark_theme->set_background_color(lv_color_hex(0x000000));
     dark_theme->set_text_color(lv_color_hex(0xEAFBF4));
@@ -384,7 +384,7 @@ void LcdDisplay::SetupUI() {
 
     /* Layer 1: Top bar - for status icons */
     top_bar_ = lv_obj_create(container_);
-    lv_obj_set_size(top_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
+    lv_obj_set_size(top_bar_, LV_HOR_RES, top_bar_h);
     lv_obj_set_style_radius(top_bar_, 0, 0);
     lv_obj_set_style_bg_opa(top_bar_, LV_OPA_50, 0);  // 50% opacity background
     lv_obj_set_style_bg_color(top_bar_, lvgl_theme->background_color(), 0);
@@ -426,16 +426,16 @@ void LcdDisplay::SetupUI() {
 
     /* Layer 2: Status bar - for center text labels */
     status_bar_ = lv_obj_create(screen);
-    lv_obj_set_size(status_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
+    lv_obj_set_size(status_bar_, LV_HOR_RES, status_bar_h);
     lv_obj_set_style_radius(status_bar_, 0, 0);
-    lv_obj_set_style_bg_opa(status_bar_, LV_OPA_TRANSP, 0);  // Transparent background
+    lv_obj_set_style_bg_opa(status_bar_, LV_OPA_20, 0);
     lv_obj_set_style_border_width(status_bar_, 0, 0);
     lv_obj_set_style_pad_all(status_bar_, 0, 0);
     lv_obj_set_style_pad_top(status_bar_, lvgl_theme->spacing(2), 0);
     lv_obj_set_style_pad_bottom(status_bar_, lvgl_theme->spacing(2), 0);
     lv_obj_set_scrollbar_mode(status_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
-    lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);  // Overlap with top_bar_
+    lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, top_bar_h);
 
     notification_label_ = lv_label_create(status_bar_);
     lv_obj_set_width(notification_label_, LV_HOR_RES * 0.8);
@@ -450,7 +450,7 @@ void LcdDisplay::SetupUI() {
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
-    lv_label_set_text(status_label_, "ClawBuddy");
+    lv_label_set_text(status_label_, "myAI");
     lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
     
     /* Content - Chat area */
@@ -828,45 +828,18 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_bg_color(container_, lvgl_theme->background_color(), 0);
     lv_obj_set_style_border_color(container_, lvgl_theme->border_color(), 0);
 
-    /* Compact ClawBuddy header. One line, near the top, leaving room for chat history. */
-    emoji_box_ = lv_obj_create(screen);
-    lv_obj_set_size(emoji_box_, LV_HOR_RES * 78 / 100, text_font->line_height + lvgl_theme->spacing(6));
-    lv_obj_set_style_bg_color(emoji_box_, lvgl_theme->assistant_bubble_color(), 0);
-    lv_obj_set_style_bg_opa(emoji_box_, LV_OPA_30, 0);
-    lv_obj_set_style_border_width(emoji_box_, 1, 0);
-    lv_obj_set_style_border_color(emoji_box_, lvgl_theme->border_color(), 0);
-    lv_obj_set_style_radius(emoji_box_, 14, 0);
-    lv_obj_set_style_pad_top(emoji_box_, lvgl_theme->spacing(1), 0);
-    lv_obj_set_style_pad_bottom(emoji_box_, lvgl_theme->spacing(1), 0);
-    lv_obj_set_style_pad_left(emoji_box_, lvgl_theme->spacing(4), 0);
-    lv_obj_set_style_pad_right(emoji_box_, lvgl_theme->spacing(4), 0);
-    lv_obj_set_flex_flow(emoji_box_, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(emoji_box_, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(emoji_box_, lvgl_theme->spacing(3), 0);
-    lv_obj_set_scrollbar_mode(emoji_box_, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_align(emoji_box_, LV_ALIGN_TOP_MID, 0, text_font->line_height + lvgl_theme->spacing(5));
+    const lv_coord_t top_bar_h = text_font->line_height + lvgl_theme->spacing(8);
 
-    emoji_label_ = lv_label_create(emoji_box_);
-    lv_obj_set_style_text_font(emoji_label_, icon_font, 0);
-    lv_obj_set_style_text_color(emoji_label_, lvgl_theme->border_color(), 0);
-    lv_label_set_text(emoji_label_, FONT_AWESOME_MICROCHIP_AI);
-
-    lv_obj_t* brand_label = lv_label_create(emoji_box_);
-    lv_label_set_text(brand_label, "ClawBuddy");
-    lv_obj_set_style_text_font(brand_label, text_font, 0);
-    lv_obj_set_style_text_color(brand_label, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_align(brand_label, LV_TEXT_ALIGN_CENTER, 0);
-
-    emoji_image_ = lv_img_create(emoji_box_);
-    lv_obj_center(emoji_image_);
-    lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+    /* Single compact top bar: Wi-Fi left, status/time center, battery/mute right. */
+    emoji_box_ = nullptr;
+    emoji_label_ = nullptr;
+    emoji_image_ = nullptr;
 
     /* Preview images are rendered inside the scrollable chat area, not as a transient overlay. */
     preview_image_ = nullptr;
 
-    /* Layer 1: Top bar - for status icons */
     top_bar_ = lv_obj_create(screen);
-    lv_obj_set_size(top_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
+    lv_obj_set_size(top_bar_, LV_HOR_RES, top_bar_h);
     lv_obj_set_style_radius(top_bar_, 0, 0);
     lv_obj_set_style_bg_opa(top_bar_, LV_OPA_20, 0);
     lv_obj_set_style_bg_color(top_bar_, lvgl_theme->background_color(), 0);
@@ -884,15 +857,31 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_scrollbar_mode(top_bar_, LV_SCROLLBAR_MODE_OFF);
     lv_obj_align(top_bar_, LV_ALIGN_TOP_MID, 0, 0);
 
-    // Left icon
     network_label_ = lv_label_create(top_bar_);
+    lv_obj_set_width(network_label_, LV_HOR_RES * 18 / 100);
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
     lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_text_align(network_label_, LV_TEXT_ALIGN_LEFT, 0);
 
-    // Right icons container
+    status_label_ = lv_label_create(top_bar_);
+    lv_obj_set_width(status_label_, LV_HOR_RES * 56 / 100);
+    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(status_label_, lvgl_theme->border_color(), 0);
+    lv_label_set_text(status_label_, "myAI");
+
+    notification_label_ = lv_label_create(top_bar_);
+    lv_obj_set_width(notification_label_, LV_HOR_RES * 56 / 100);
+    lv_label_set_long_mode(notification_label_, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
+    lv_label_set_text(notification_label_, "");
+    lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
+
     lv_obj_t* right_icons = lv_obj_create(top_bar_);
-    lv_obj_set_size(right_icons, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_width(right_icons, LV_HOR_RES * 18 / 100);
+    lv_obj_set_height(right_icons, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(right_icons, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(right_icons, 0, 0);
     lv_obj_set_style_pad_all(right_icons, 0, 0);
@@ -910,37 +899,10 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_margin_left(battery_label_, lvgl_theme->spacing(2), 0);
 
-    /* Layer 2: Status bar - for center text labels */
-    status_bar_ = lv_obj_create(screen);
-    lv_obj_set_size(status_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
-    lv_obj_set_style_radius(status_bar_, 0, 0);
-    lv_obj_set_style_bg_opa(status_bar_, LV_OPA_TRANSP, 0);  // Transparent background
-    lv_obj_set_style_border_width(status_bar_, 0, 0);
-    lv_obj_set_style_pad_all(status_bar_, 0, 0);
-    lv_obj_set_style_pad_top(status_bar_, lvgl_theme->spacing(2), 0);
-    lv_obj_set_style_pad_bottom(status_bar_, lvgl_theme->spacing(2), 0);
-    lv_obj_set_scrollbar_mode(status_bar_, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_style_layout(status_bar_, LV_LAYOUT_NONE, 0);  // Use absolute positioning
-    lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);  // Overlap with top_bar_
+    status_bar_ = nullptr;
 
-    notification_label_ = lv_label_create(status_bar_);
-    lv_obj_set_width(notification_label_, LV_HOR_RES * 0.75);
-    lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
-    lv_label_set_text(notification_label_, "");
-    lv_obj_align(notification_label_, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
-
-    status_label_ = lv_label_create(status_bar_);
-    lv_obj_set_width(status_label_, LV_HOR_RES * 0.62);
-    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(status_label_, lvgl_theme->border_color(), 0);
-    lv_label_set_text(status_label_, "ClawBuddy");
-    lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
-
-    /* Scrollable iMessage-style conversation history. */
-    lv_coord_t chat_top = text_font->line_height * 2 + lvgl_theme->spacing(16);
+    /* Scrollable iMessage-style conversation history. Starts directly below the compact top bar. */
+    lv_coord_t chat_top = top_bar_h;
     content_ = lv_obj_create(screen);
     lv_obj_set_pos(content_, 0, chat_top);
     lv_obj_set_size(content_, LV_HOR_RES, LV_VER_RES - chat_top);
@@ -1061,7 +1023,7 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     }
 }
 
-#define CLAWBUDDY_MAX_CHAT_ITEMS 80
+#define MYAI_MAX_CHAT_ITEMS 80
 
 void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     if (!setup_ui_called_) {
@@ -1150,7 +1112,7 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
 
     chat_message_label_ = label;
 
-    while (lv_obj_get_child_cnt(content_) > CLAWBUDDY_MAX_CHAT_ITEMS) {
+    while (lv_obj_get_child_cnt(content_) > MYAI_MAX_CHAT_ITEMS) {
         lv_obj_t* first_child = lv_obj_get_child(content_, 0);
         if (first_child == nullptr) {
             break;
@@ -1269,13 +1231,13 @@ void LcdDisplay::SetTheme(Theme* theme) {
     auto large_icon_font = lvgl_theme->large_icon_font()->font();
 
     if (text_font->line_height >= 40) {
-        lv_obj_set_style_text_font(mute_label_, large_icon_font, 0);
-        lv_obj_set_style_text_font(battery_label_, large_icon_font, 0);
-        lv_obj_set_style_text_font(network_label_, large_icon_font, 0);
+        if (mute_label_ != nullptr) lv_obj_set_style_text_font(mute_label_, large_icon_font, 0);
+        if (battery_label_ != nullptr) lv_obj_set_style_text_font(battery_label_, large_icon_font, 0);
+        if (network_label_ != nullptr) lv_obj_set_style_text_font(network_label_, large_icon_font, 0);
     } else {
-        lv_obj_set_style_text_font(mute_label_, icon_font, 0);
-        lv_obj_set_style_text_font(battery_label_, icon_font, 0);
-        lv_obj_set_style_text_font(network_label_, icon_font, 0);
+        if (mute_label_ != nullptr) lv_obj_set_style_text_font(mute_label_, icon_font, 0);
+        if (battery_label_ != nullptr) lv_obj_set_style_text_font(battery_label_, icon_font, 0);
+        if (network_label_ != nullptr) lv_obj_set_style_text_font(network_label_, icon_font, 0);
     }
 
     // Set parent text color
@@ -1297,12 +1259,12 @@ void LcdDisplay::SetTheme(Theme* theme) {
     }
     
     // Update status bar elements
-    lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(mute_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
+    if (network_label_ != nullptr) lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
+    if (status_label_ != nullptr) lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
+    if (notification_label_ != nullptr) lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
+    if (mute_label_ != nullptr) lv_obj_set_style_text_color(mute_label_, lvgl_theme->text_color(), 0);
+    if (battery_label_ != nullptr) lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
+    if (emoji_label_ != nullptr) lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
 
     // If we have the chat message style, update all message bubbles
 #if CONFIG_USE_WECHAT_MESSAGE_STYLE

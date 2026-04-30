@@ -1,5 +1,24 @@
 # ClawBuddy Changelog
 
+## 2026-04-30 — assistant turn listening lockout
+
+- Firmware now keeps voice processing/listening disabled during assistant TTS, including realtime/AEC mode.
+- Listening/UI resumes only after queued and currently-playing assistant audio has fully drained.
+
+## 2026-04-28 — multi-camera OpenClaw Vision scene bundles
+
+- Added `config/vision-cameras.example.json` registry with HT-HC33 OpenClaw Vision and XIAO ESP32-S3 Sense camera `90:70:69:12:ca:58` at `192.168.50.62` (`/capture`).
+- Added `bin/clawbuddy vision list|capture|scene-prompt` for configured/LAN-discovered cameras and all-camera snapshot bundles.
+- Added local server endpoints `/vision/cameras`, `/vision/capture`, and `/vision/policy`.
+- Added firmware-observed camera metadata to `/vision/cameras` so bench label/model mismatches are visible during testing.
+- Hardened snapshot capture to reject non-JPEG responses instead of storing them as scene images.
+- Corrected the XIAO ESP32-S3 Sense camera firmware status model string.
+- Documented scene behavior: describe each camera separately unless multiple views are confidently the same scene from different angles.
+
+## 2026-04-28 — 12-hour clock
+
+- Changed the idle firmware status-bar clock from 24-hour `HH:MM` to 12-hour `H:MM AM/PM`.
+
 ## 2026-04-28 — PTT text-only replies
 
 - Bumped firmware to `0.1.6-clawbuddy` for OTA testing.

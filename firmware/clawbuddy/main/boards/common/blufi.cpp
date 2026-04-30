@@ -12,7 +12,7 @@
 #include "freertos/task.h"
 #include "wifi_manager.h"
 
-#define BLUFI_DEVICE_NAME "ClawBuddy-BLE"
+#define BLUFI_DEVICE_NAME "myAI-BLE"
 
 #ifdef CONFIG_BT_BLUEDROID_ENABLED
 #include "esp_bt_device.h"

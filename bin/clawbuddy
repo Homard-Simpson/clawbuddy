@@ -6,15 +6,19 @@ Safe by default: operates on products/clawbuddy config only. Live prototype insp
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import hashlib
 import json
 import os
 import re
 import socket
 import subprocess
 import sys
+import time
 import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 VOICE_PROFILES = ROOT / "config" / "voice-profiles.json"
@@ -22,6 +26,9 @@ RUNTIME_EXAMPLE = ROOT / "config" / "runtime.example.json"
 RUNTIME_LOCAL = ROOT / "config" / "runtime.local.json"
 PAIRING_LOCAL = ROOT / "config" / "device-allowlist.local.json"
 PAIRING_EXAMPLE = ROOT / "config" / "device-allowlist.example.json"
+VISION_LOCAL = ROOT / "config" / "vision-cameras.local.json"
+VISION_EXAMPLE = ROOT / "config" / "vision-cameras.example.json"
+CACHE_DIR = ROOT / ".cache"
 LIVE_CONFIG = Path.home() / ".openclaw/workspace/xiaozhi-bridge/xiaozhi-esp32-server/main/xiaozhi-server/data/.config.yaml"
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -29,6 +36,176 @@ def load_json(path: Path) -> dict[str, Any]:
 
 def save_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=False) + "\n")
+
+
+def vision_path() -> Path:
+    return VISION_LOCAL if VISION_LOCAL.exists() else VISION_EXAMPLE
+
+def default_vision_data() -> dict[str, Any]:
+    return {"schema": "clawbuddy.vision-cameras.v1", "discovery": {"enabled": True}, "cameras": []}
+
+def load_vision(path: Path | None = None) -> dict[str, Any]:
+    path = path or vision_path()
+    if not path.exists():
+        return default_vision_data()
+    data = load_json(path)
+    data.setdefault("schema", "clawbuddy.vision-cameras.v1")
+    data.setdefault("discovery", {"enabled": True})
+    data.setdefault("cameras", [])
+    return data
+
+def normalize_camera(rec: dict[str, Any]) -> dict[str, Any]:
+    endpoint = str(rec.get("endpoint", "")).strip()
+    parsed = urlparse(endpoint)
+    host = parsed.hostname or ""
+    ident = str(rec.get("id") or host or endpoint).strip().lower()
+    ident = re.sub(r"[^a-z0-9_.:-]+", "-", ident).strip("-") or hashlib.sha1(endpoint.encode()).hexdigest()[:12]
+    out = dict(rec)
+    out["id"] = ident
+    out.setdefault("label", ident)
+    out.setdefault("enabled", True)
+    out["endpoint"] = endpoint
+    if endpoint and not out.get("statusEndpoint"):
+        out["statusEndpoint"] = endpoint.rsplit("/", 1)[0] + "/status"
+    return out
+
+def configured_cameras(enabled_only: bool = True) -> list[dict[str, Any]]:
+    cameras = [normalize_camera(c) for c in load_vision().get("cameras", []) if c.get("endpoint")]
+    if enabled_only:
+        cameras = [c for c in cameras if c.get("enabled", True)]
+    return cameras
+
+def http_fetch(url: str, timeout: float = 1.0, max_bytes: int = 4_000_000) -> tuple[int | None, bytes, str | None]:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "clawbuddy-vision/0.1"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - LAN camera snapshots only
+            data = resp.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                return int(resp.status), data[:max_bytes], "too_large"
+            return int(resp.status), data, None
+    except Exception as exc:
+        return None, b"", exc.__class__.__name__
+
+def camera_health(camera: dict[str, Any], timeout: float = 1.0) -> dict[str, Any]:
+    url = str(camera.get("statusEndpoint") or camera.get("endpoint"))
+    status, body, err = http_fetch(url, timeout=timeout, max_bytes=32768)
+    detail: dict[str, Any] | None = None
+    if status and body:
+        try:
+            detail = json.loads(body.decode(errors="ignore"))
+        except Exception:
+            detail = None
+    return {"ok": bool(status and 200 <= status < 300), "httpStatus": status, "error": err, "status": detail}
+
+def camera_with_observed_status(camera: dict[str, Any], health: dict[str, Any]) -> dict[str, Any]:
+    """Return camera config plus non-authoritative facts reported by firmware."""
+    out = dict(camera)
+    detail = health.get("status") if isinstance(health, dict) else None
+    if isinstance(detail, dict):
+        if detail.get("camera"):
+            out["observedModel"] = detail.get("camera")
+        if detail.get("hostname"):
+            out["observedHostname"] = detail.get("hostname")
+        if detail.get("sta_ip"):
+            out["observedIp"] = detail.get("sta_ip")
+    return out
+
+def vision_camera_payload(timeout: float = 0.35, scan: bool = True) -> dict[str, Any]:
+    rows = []
+    for camera in discover_cameras(timeout=timeout, scan=scan):
+        health = camera_health(camera, timeout=timeout)
+        rows.append({**camera_with_observed_status(camera, health), "health": health})
+    return {"path": str(vision_path()), "count": len(rows), "cameras": rows, "scenePolicy": scene_policy_text()}
+
+def camera_subnets(cameras: list[dict[str, Any]]) -> list[str]:
+    subnets: set[str] = set()
+    for camera in cameras:
+        host = urlparse(str(camera.get("endpoint", ""))).hostname or ""
+        if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", host):
+            subnets.add(".".join(host.split(".")[:3]))
+    return sorted(subnets)
+
+def discover_cameras(timeout: float = 0.2, scan: bool = True) -> list[dict[str, Any]]:
+    known = configured_cameras(enabled_only=False)
+    found: dict[str, dict[str, Any]] = {c["endpoint"]: {**c, "source": "config"} for c in known}
+    if not scan:
+        return list(found.values())
+
+    def probe(host: str) -> dict[str, Any] | None:
+        endpoint = f"http://{host}/capture"
+        if endpoint in found:
+            return None
+        status_url = f"http://{host}/status"
+        status, body, _err = http_fetch(status_url, timeout=timeout, max_bytes=32768)
+        if not status or not (200 <= status < 300):
+            return None
+        text = body.decode(errors="ignore")
+        if "OpenClaw Vision" not in text and '\"ok\":true' not in text:
+            return None
+        label = f"OpenClaw Vision {host}"
+        try:
+            detail = json.loads(text)
+            label = str(detail.get("camera") or detail.get("name") or label)
+        except Exception:
+            pass
+        return normalize_camera({
+            "id": f"openclaw-vision-{host.replace('.', '-')}",
+            "label": label,
+            "endpoint": endpoint,
+            "statusEndpoint": status_url,
+            "enabled": True,
+            "source": "lan-scan",
+            "tags": ["openclaw-vision", "discovered"],
+        })
+
+    for subnet in camera_subnets(known):
+        hosts = [f"{subnet}.{host_id}" for host_id in range(1, 255)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=128) as pool:
+            for camera in pool.map(probe, hosts):
+                if camera:
+                    found[camera["endpoint"]] = camera
+    return list(found.values())
+
+def capture_camera(camera: dict[str, Any], out_dir: Path, timeout: float = 2.0) -> dict[str, Any]:
+    status, body, err = http_fetch(str(camera.get("endpoint")), timeout=timeout)
+    rec: dict[str, Any] = {"camera": camera, "ok": False, "httpStatus": status, "error": err}
+    if not status or not (200 <= status < 300) or not body:
+        return rec
+    if not body.startswith(b"\xff\xd8\xff"):
+        rec["error"] = "not_jpeg"
+        rec["bytes"] = len(body)
+        return rec
+    digest = hashlib.sha1(body).hexdigest()[:12]
+    safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "-", str(camera.get("id", "camera"))).strip("-") or "camera"
+    path = out_dir / f"{safe_id}-{digest}.jpg"
+    path.write_bytes(body)
+    rec.update({"ok": True, "bytes": len(body), "sha1": digest, "path": str(path)})
+    return rec
+
+def scene_policy_text() -> str:
+    return (
+        "Use every successful camera image. Describe each camera separately unless multiple images are "
+        "strongly likely to be different angles of the same scene; then give one combined scene description "
+        "and mention the supporting camera labels. Call out unavailable cameras briefly."
+    )
+
+def capture_all_cameras(timeout: float = 2.0, scan: bool = True) -> dict[str, Any]:
+    cameras = discover_cameras(timeout=min(timeout, 0.35), scan=scan)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    out_dir = CACHE_DIR / "vision" / stamp
+    out_dir.mkdir(parents=True, exist_ok=True)
+    captures = [capture_camera(c, out_dir, timeout=timeout) for c in cameras if c.get("enabled", True)]
+    bundle = {
+        "schema": "clawbuddy.vision-scene-bundle.v1",
+        "createdAt": stamp,
+        "cameraConfig": str(vision_path()),
+        "cameraCount": len(cameras),
+        "captureCount": len([c for c in captures if c.get("ok")]),
+        "captures": captures,
+        "scenePolicy": scene_policy_text(),
+    }
+    save_json(out_dir / "bundle.json", bundle)
+    return bundle
 
 def default_pairing_data() -> dict[str, Any]:
     return {"schema": "clawbuddy.device-allowlist.v1", "approved": [], "pending": []}
@@ -306,6 +483,41 @@ def cmd_pair(args: argparse.Namespace) -> int:
     print("Choose: add, list, or snippet", file=sys.stderr)
     return 2
 
+
+def cmd_vision(args: argparse.Namespace) -> int:
+    if args.vision_cmd == "list":
+        payload = vision_camera_payload(timeout=args.timeout, scan=not args.no_scan)
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"vision config: {payload['path']}")
+            for cam in payload["cameras"]:
+                health = cam.get("health", {})
+                state = "ok" if health.get("ok") else f"down:{health.get('error') or health.get('httpStatus')}"
+                observed = f" observed={cam['observedModel']}" if cam.get("observedModel") else ""
+                print(f"- {cam.get('id')}: {cam.get('label')} {state}{observed}")
+                print(f"  capture: {cam.get('endpoint')}")
+        return 0
+    if args.vision_cmd == "capture":
+        bundle = capture_all_cameras(timeout=args.timeout, scan=not args.no_scan)
+        if args.json:
+            print(json.dumps(bundle, indent=2))
+        else:
+            print(f"captured {bundle['captureCount']}/{len(bundle['captures'])} cameras")
+            for cap in bundle["captures"]:
+                cam = cap.get("camera", {})
+                if cap.get("ok"):
+                    print(f"- {cam.get('label')}: {cap.get('path')}")
+                else:
+                    print(f"- {cam.get('label')}: unavailable ({cap.get('error') or cap.get('httpStatus')})")
+            print("policy: " + bundle["scenePolicy"])
+        return 0 if bundle["captureCount"] else 1
+    if args.vision_cmd == "scene-prompt":
+        print(scene_policy_text())
+        return 0
+    print("Choose: list, capture, or scene-prompt", file=sys.stderr)
+    return 2
+
 def cmd_status(args: argparse.Namespace) -> int:
     data = product_status(include_live=args.live)
     if args.json:
@@ -339,6 +551,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("profile", choices=sorted(profile_data().get("profiles", {}).keys()))
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_tune)
+
+    sp = sub.add_parser("vision", help="List/discover OpenClaw Vision cameras and capture scene bundles")
+    vision_sub = sp.add_subparsers(dest="vision_cmd", required=True)
+    vision_list = vision_sub.add_parser("list", help="List configured/discovered cameras and health")
+    vision_list.add_argument("--json", action="store_true")
+    vision_list.add_argument("--no-scan", action="store_true", help="Only use configured cameras; do not scan configured subnets")
+    vision_list.add_argument("--timeout", type=float, default=0.35)
+    vision_capture = vision_sub.add_parser("capture", help="Capture snapshots from every available camera into a scene bundle")
+    vision_capture.add_argument("--json", action="store_true")
+    vision_capture.add_argument("--no-scan", action="store_true", help="Only use configured cameras; do not scan configured subnets")
+    vision_capture.add_argument("--timeout", type=float, default=2.0)
+    vision_sub.add_parser("scene-prompt", help="Print the scene-description policy for multimodal callers")
+    sp.set_defaults(func=cmd_vision)
 
     sp = sub.add_parser("pair", help="Pair/allowlist a ClawBuddy device locally; does not mutate live services")
     pair_sub = sp.add_subparsers(dest="pair_cmd", required=True)

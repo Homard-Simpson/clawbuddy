@@ -1,8 +1,8 @@
-menu "ClawBuddy"
+menu "myAI"
 
 config OTA_URL
     string "Default OTA URL"
-    default "https://your-clawbuddy-host.example.com/clawbuddy/ota/"
+    default "https://your-myai-host.example.com/myai/ota/"
     help
         The application will access this URL to check for new firmwares and server address.
 
@@ -642,7 +642,7 @@ choice DISPLAY_STYLE
     prompt "Select display style"
     default USE_DEFAULT_MESSAGE_STYLE
     help
-        Select display style for ClawBuddy device
+        Select display style for myAI device
 
     config USE_DEFAULT_MESSAGE_STYLE
         bool "Enable default message style"
