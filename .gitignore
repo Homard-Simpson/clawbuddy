@@ -38,6 +38,7 @@ firmware/**/.espressif/
 firmware/**/*.elf
 firmware/**/*.map
 firmware/**/*.bin
+firmware/**/ota/
 firmware/**/sdkconfig.old
 firmware/**/dependencies.lock
 

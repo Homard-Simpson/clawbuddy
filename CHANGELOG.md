@@ -1,5 +1,12 @@
 # ClawBuddy Changelog
 
+## 2026-04-30 — myAI loading polish
+
+- Bumped firmware to `0.1.13-myai`.
+- Added centered myAI wordmark on the firmware splash/loading screen.
+- Made firmware loading/connecting status text smaller on the Waveshare AMOLED UI.
+- Added local-only myAI OTA metadata/download endpoints to `bin/clawbuddy-server`.
+
 ## 2026-04-30 — assistant turn listening lockout
 
 - Firmware now keeps voice processing/listening disabled during assistant TTS, including realtime/AEC mode.

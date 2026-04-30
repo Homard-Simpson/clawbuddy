@@ -10,6 +10,7 @@ import html
 import importlib.machinery
 import importlib.util
 import json
+import re
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -26,6 +27,42 @@ loader.exec_module(clawbuddy)  # type: ignore[arg-type]
 
 HOST = "127.0.0.1"
 DEFAULT_PORT = 8199
+FIRMWARE_ROOT = ROOT / "firmware" / "clawbuddy"
+OTA_ROOT = FIRMWARE_ROOT / "ota"
+
+
+def current_firmware_version() -> str | None:
+    cmake_path = FIRMWARE_ROOT / "CMakeLists.txt"
+    if not cmake_path.exists():
+        return None
+    match = re.search(r'set\(PROJECT_VER\s+"([^"]+)"\)', cmake_path.read_text(errors="ignore"))
+    return match.group(1) if match else None
+
+
+def staged_ota_binary(version: str | None = None) -> Path | None:
+    version = version or current_firmware_version()
+    if not version:
+        return None
+    candidate = OTA_ROOT / f"v{version}" / "myai.bin"
+    if candidate.exists():
+        return candidate
+    build_candidate = FIRMWARE_ROOT / "build" / "myai.bin"
+    if build_candidate.exists():
+        return build_candidate
+    return None
+
+
+def ota_payload(base_url: str) -> dict:
+    version = current_firmware_version()
+    binary = staged_ota_binary(version)
+    firmware = {"version": version, "url": None, "staged": False}
+    if version and binary:
+        firmware.update({
+            "url": f"{base_url.rstrip('/')}/myai/firmware/v{version}/myai.bin",
+            "staged": True,
+            "bytes": binary.stat().st_size,
+        })
+    return {"firmware": firmware}
 
 
 def pairing_html(message: str = "") -> str:
@@ -107,9 +144,22 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def send_file(self, path: Path, content_type: str = "application/octet-stream"):
+        data = path.read_bytes()
+        self.send_response(200)
+        self.send_header("content-type", content_type)
+        self.send_header("cache-control", "no-store")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def base_url(self) -> str:
+        host = self.headers.get("host") or f"127.0.0.1:{self.server.server_port}"
+        return f"http://{host}"
+
     def do_GET(self):
         if self.path in ("/", "/health"):
-            self.send_json({"ok": True, "product": "ClawBuddy", "port": self.server.server_port, "pairing": "/pair"})
+            self.send_json({"ok": True, "product": "ClawBuddy", "port": self.server.server_port, "pairing": "/pair", "ota": "/myai/ota/"})
             return
         if self.path == "/status":
             self.send_json(clawbuddy.product_status(include_live=False))
@@ -134,6 +184,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/pair.json":
             self.send_json(clawbuddy.pairing_status())
+            return
+        if self.path in ("/myai/ota", "/myai/ota/"):
+            self.send_json(ota_payload(self.base_url()), status=200)
+            return
+        match = re.fullmatch(r"/myai/firmware/v([^/]+)/myai\.bin", self.path)
+        if match:
+            binary = staged_ota_binary(match.group(1))
+            if binary is None:
+                self.send_json({"ok": False, "error": "firmware_not_staged", "version": match.group(1)}, status=404)
+                return
+            self.send_file(binary)
             return
         self.send_json({"ok": False, "error": "not_found"}, status=404)
 
