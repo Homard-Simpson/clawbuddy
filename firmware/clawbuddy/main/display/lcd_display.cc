@@ -24,6 +24,42 @@ LV_FONT_DECLARE(font_awesome_30_4);
 LV_FONT_DECLARE(font_puhui_basic_14_1);
 LV_FONT_DECLARE(font_puhui_basic_30_4);
 
+static lv_obj_t* CreateMyAILogo(lv_obj_t* parent, LvglTheme* theme) {
+    lv_obj_t* logo = lv_obj_create(parent);
+    lv_obj_set_size(logo, 142, 112);
+    lv_obj_set_style_bg_opa(logo, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(logo, 0, 0);
+    lv_obj_set_style_pad_all(logo, 0, 0);
+    lv_obj_clear_flag(logo, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* mark = lv_obj_create(logo);
+    lv_obj_set_size(mark, 72, 72);
+    lv_obj_align(mark, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_radius(mark, 24, 0);
+    lv_obj_set_style_bg_color(mark, theme->border_color(), 0);
+    lv_obj_set_style_bg_opa(mark, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(mark, 2, 0);
+    lv_obj_set_style_border_color(mark, lv_color_white(), 0);
+    lv_obj_set_style_shadow_width(mark, 18, 0);
+    lv_obj_set_style_shadow_opa(mark, LV_OPA_40, 0);
+    lv_obj_set_style_shadow_color(mark, theme->border_color(), 0);
+    lv_obj_clear_flag(mark, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t* ai = lv_label_create(mark);
+    lv_obj_set_style_text_font(ai, &font_puhui_basic_30_4, 0);
+    lv_obj_set_style_text_color(ai, lv_color_black(), 0);
+    lv_label_set_text(ai, "AI");
+    lv_obj_center(ai);
+
+    lv_obj_t* wordmark = lv_label_create(logo);
+    lv_obj_set_style_text_font(wordmark, &font_puhui_basic_30_4, 0);
+    lv_obj_set_style_text_color(wordmark, theme->border_color(), 0);
+    lv_label_set_text(wordmark, "myAI");
+    lv_obj_align(wordmark, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    return logo;
+}
+
 void LcdDisplay::InitializeLcdThemes() {
     auto text_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_TEXT_FONT);
     auto icon_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_ICON_FONT);
@@ -491,12 +527,10 @@ void LcdDisplay::SetupUI() {
     emoji_image_ = lv_img_create(screen);
     lv_obj_align(emoji_image_, LV_ALIGN_TOP_MID, 0, text_font->line_height + lvgl_theme->spacing(8));
 
-    // Display the myAI wordmark while booting/loading.
-    emoji_label_ = lv_label_create(screen);
-    lv_obj_center(emoji_label_);
-    lv_obj_set_style_text_font(emoji_label_, &font_puhui_basic_30_4, 0);
-    lv_obj_set_style_text_color(emoji_label_, lvgl_theme->border_color(), 0);
-    lv_label_set_text(emoji_label_, "myAI");
+    // Display the graphical myAI logo while booting/loading.
+    emoji_box_ = CreateMyAILogo(screen, lvgl_theme);
+    lv_obj_center(emoji_box_);
+    emoji_label_ = lv_obj_get_child(emoji_box_, 1);
 }
 #if CONFIG_IDF_TARGET_ESP32P4
 #define  MAX_MESSAGES 40
@@ -799,6 +833,9 @@ void LcdDisplay::ClearChatMessages() {
     if (emoji_label_ != nullptr) {
         lv_obj_remove_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
     }
+    if (emoji_box_ != nullptr) {
+        lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    }
     
     ESP_LOGI(TAG, "Chat messages cleared");
 }
@@ -868,7 +905,7 @@ void LcdDisplay::SetupUI() {
 
     status_label_ = lv_label_create(top_bar_);
     lv_obj_set_width(status_label_, LV_HOR_RES * 56 / 100);
-    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(status_label_, &font_puhui_basic_14_1, 0);
     lv_obj_set_style_text_color(status_label_, lvgl_theme->border_color(), 0);
@@ -876,7 +913,7 @@ void LcdDisplay::SetupUI() {
 
     notification_label_ = lv_label_create(top_bar_);
     lv_obj_set_width(notification_label_, LV_HOR_RES * 56 / 100);
-    lv_label_set_long_mode(notification_label_, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(notification_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(notification_label_, "");
@@ -904,12 +941,10 @@ void LcdDisplay::SetupUI() {
 
     status_bar_ = nullptr;
 
-    // Centered myAI wordmark for splash/loading until conversation content appears.
-    emoji_label_ = lv_label_create(screen);
-    lv_obj_set_style_text_font(emoji_label_, &font_puhui_basic_30_4, 0);
-    lv_obj_set_style_text_color(emoji_label_, lvgl_theme->border_color(), 0);
-    lv_label_set_text(emoji_label_, "myAI");
-    lv_obj_center(emoji_label_);
+    // Centered graphical myAI logo for splash/loading until conversation content appears.
+    emoji_box_ = CreateMyAILogo(screen, lvgl_theme);
+    lv_obj_center(emoji_box_);
+    emoji_label_ = lv_obj_get_child(emoji_box_, 1);
 
     /* Scrollable iMessage-style conversation history. Starts directly below the compact top bar. */
     lv_coord_t chat_top = top_bar_h;
@@ -969,6 +1004,9 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
 
     if (emoji_label_ != nullptr) {
         lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (emoji_box_ != nullptr) {
+        lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
     }
 
     auto lvgl_theme = static_cast<LvglTheme*>(current_theme_);
@@ -1055,6 +1093,9 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     }
     if (emoji_label_ != nullptr) {
         lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (emoji_box_ != nullptr) {
+        lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
     }
 
     auto lvgl_theme = static_cast<LvglTheme*>(current_theme_);
@@ -1159,6 +1200,9 @@ void LcdDisplay::ClearChatMessages() {
     if (emoji_label_ != nullptr) {
         lv_obj_remove_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
     }
+    if (emoji_box_ != nullptr) {
+        lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 #endif
 
@@ -1197,6 +1241,9 @@ void LcdDisplay::SetEmotion(const char* emotion) {
             lv_label_set_text(emoji_label_, utf8);
             lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_remove_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+            if (emoji_box_ != nullptr) {
+                lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+            }
         }
         return;
     }
@@ -1218,6 +1265,9 @@ void LcdDisplay::SetEmotion(const char* emotion) {
             
             // Show GIF, hide others
             lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+            if (emoji_box_ != nullptr) {
+                lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+            }
             lv_obj_remove_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
         } else {
             ESP_LOGE(TAG, "Failed to load GIF for emotion: %s", emotion);
@@ -1226,6 +1276,9 @@ void LcdDisplay::SetEmotion(const char* emotion) {
     } else {
         lv_image_set_src(emoji_image_, image->image_dsc());
         lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+        if (emoji_box_ != nullptr) {
+            lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+        }
         lv_obj_remove_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
     }
 
