@@ -1,14 +1,14 @@
-# Tailscale setup: make ClawBuddy work anywhere
+# Tailscale setup: make myAI work anywhere
 
-This is the easiest public-prototype pattern if you want ClawBuddy to work away from home.
+This is the easiest public-prototype pattern if you want myAI to work away from home.
 
 Plain English version:
 
-- Your Mac/server runs OpenClaw + the ClawBuddy server.
+- Your Mac/server runs OpenClaw + the myAI server.
 - Tailscale Funnel gives that server a safe HTTPS address.
-- ClawBuddy connects to that HTTPS address from any normal Wi-Fi network.
+- myAI connects to that HTTPS address from any normal Wi-Fi network.
 - The device does **not** need Tailscale installed.
-- Only paired/approved devices can actually use ClawBuddy. Random unpaired devices may see that an OTA endpoint exists, but they cannot receive firmware, websocket config, or reach the OpenClaw agent. That is the security win: public route, private access.
+- Only paired/approved devices can actually use myAI. Random unpaired devices may see that an OTA endpoint exists, but they cannot receive firmware, websocket config, or reach the OpenClaw agent. That is the security win: public route, private access.
 
 ![Tailscale anywhere flow](assets/clawbuddy-tailscale-anywhere.svg)
 
@@ -17,8 +17,8 @@ Plain English version:
 - A Mac/Linux machine that can stay on.
 - Tailscale installed and logged in on that machine.
 - Funnel enabled for your tailnet/account.
-- ClawBuddy server/OTA endpoints running locally.
-- A ClawBuddy firmware build that knows your OTA URL.
+- myAI server/OTA endpoints running locally.
+- A myAI firmware build that knows your OTA URL.
 
 Use placeholders below:
 
@@ -27,9 +27,9 @@ Use placeholders below:
 
 ## Pairing and security: public route, private access
 
-Tailscale Funnel makes a small HTTPS doorway reachable from the internet. That does **not** mean every device can talk to ClawBuddy or OpenClaw.
+Tailscale Funnel makes a small HTTPS doorway reachable from the internet. That does **not** mean every device can talk to myAI or OpenClaw.
 
-ClawBuddy uses a pairing/allowlist check at the OTA gateway:
+myAI uses a pairing/allowlist check at the OTA gateway:
 
 1. The ESP sends its `device-id` and `client-id` when it calls the OTA endpoint.
 2. The server checks those values against its approved device/client allowlist.
@@ -38,7 +38,7 @@ ClawBuddy uses a pairing/allowlist check at the OTA gateway:
 
 Why this is good:
 
-- You can use ClawBuddy anywhere without opening your whole network.
+- You can use myAI anywhere without opening your whole network.
 - Dashboards/admin pages stay private or tailnet-only.
 - Losing the public URL is not enough to control your assistant.
 - New devices must be deliberately paired/approved before they can reach Claw/OpenClaw.
@@ -77,7 +77,7 @@ Pairing is deliberately **not** exposed through Tailscale Funnel. Do it locally 
 CLI-only version:
 
 ```bash
-bin/clawbuddy pair add aa:bb:cc:dd:ee:ff 00000000-0000-4000-8000-000000000000 --label "my ClawBuddy"
+bin/clawbuddy pair add aa:bb:cc:dd:ee:ff 00000000-0000-4000-8000-000000000000 --label "my myAI"
 bin/clawbuddy pair list
 ```
 
@@ -95,7 +95,7 @@ Do **not** expose dashboards/admin pages unless you know exactly why.
 
 ## Example Tailscale Funnel commands
 
-Run these on the server/Mac that runs ClawBuddy/OpenClaw:
+Run these on the server/Mac that runs myAI/OpenClaw:
 
 ```bash
 tailscale funnel --bg --yes --https=<https-port> --set-path / http://127.0.0.1:8000
@@ -135,7 +135,7 @@ The firmware checks the OTA URL in this order:
 
 Normal setup should use the setup page field, not firmware editing:
 
-1. Join the temporary `ClawBuddy-XXXX` Wi-Fi setup network.
+1. Join the temporary `myAI-XXXX` Wi-Fi setup network.
 2. Open the captive portal or `http://192.168.4.1`.
 3. On **Advanced**, set **Custom OTA URL** to your Tailscale Funnel HTTPS URL.
 4. Leave it blank to fall back to the build-time default.

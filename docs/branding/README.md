@@ -1,12 +1,12 @@
-# ClawBuddy brand kit
+# myAI brand kit
 
-ClawBuddy is a portable OpenClaw companion: a small, friendly voice device for reaching your agent without opening a laptop or phone.
+myAI is a portable OpenClaw companion: a small, friendly voice device for reaching your agent without opening a laptop or phone.
 
 ## Positioning
 
 **Tagline:** Your OpenClaw companion, always within reach.
 
-**Promise:** ClawBuddy makes a personal agent feel tangible: push a button, ask naturally, and get help through a dedicated handheld device.
+**Promise:** myAI makes a personal agent feel tangible: push a button, ask naturally, and get help through a dedicated handheld device.
 
 **Audience:** builders, early adopters, and teams exploring local-first voice devices for agent workflows.
 
@@ -16,8 +16,8 @@ ClawBuddy is a portable OpenClaw companion: a small, friendly voice device for r
 
 | Role | Name | Hex | Use |
 | --- | --- | --- | --- |
-| Primary | Claw Blue | `#3056D3` | Logo, primary buttons, key diagrams |
-| Secondary | Buddy Mint | `#2DD4BF` | Highlights, friendly accents, status glow |
+| Primary | myAI Blue | `#3056D3` | Logo, primary buttons, key diagrams |
+| Secondary | AI Mint | `#2DD4BF` | Highlights, friendly accents, status glow |
 | Deep neutral | Night Slate | `#0F172A` | Headlines, wordmark, high-contrast text |
 | Soft background | Cloud Shell | `#F8FAFC` | Page backgrounds, panels |
 | Warm accent | Signal Amber | `#F59E0B` | Launch callouts, warnings, attention moments |
@@ -26,8 +26,8 @@ ClawBuddy is a portable OpenClaw companion: a small, friendly voice device for r
 Accessibility notes:
 
 - Use Night Slate on Cloud Shell for body text.
-- Use Claw Blue with white text for primary calls to action.
-- Use Buddy Mint as an accent, not the only carrier of important state.
+- Use myAI Blue with white text for primary calls to action.
+- Use AI Mint as an accent, not the only carrier of important state.
 
 ## Typography
 
@@ -41,7 +41,7 @@ Default feel: rounded, readable, modern, and not overly futuristic.
 
 ## Tone and voice
 
-ClawBuddy copy should sound like a helpful teammate, not a gadget trying too hard.
+myAI copy should sound like a helpful teammate, not a gadget trying too hard.
 
 Do:
 
@@ -58,11 +58,11 @@ Avoid:
 
 ## Logo usage
 
-Primary logo: [`assets/clawbuddy-logo.svg`](assets/clawbuddy-logo.svg)
+Primary logo: [`assets/myai-logo.svg`](assets/myai-logo.svg)
 
-Logo mark only: [`assets/clawbuddy-mark.svg`](assets/clawbuddy-mark.svg)
+Logo mark only: [`assets/myai-mark.svg`](assets/myai-mark.svg)
 
-Social preview-style card: [`assets/clawbuddy-social-preview.svg`](assets/clawbuddy-social-preview.svg)
+Social preview-style card: [`assets/myai-social-preview.svg`](assets/myai-social-preview.svg)
 
 Guidance:
 
@@ -76,21 +76,21 @@ Guidance:
 
 ### One-liner
 
-ClawBuddy is a handheld voice companion that keeps your OpenClaw agent one button away.
+myAI is a handheld voice companion that keeps your OpenClaw agent one button away.
 
 ### Short product description
 
-ClawBuddy turns an OpenClaw agent into a dedicated, portable voice device. Speak naturally, send requests over Wi‑Fi, and receive answers through a small prototype built for local-first experimentation.
+myAI turns an OpenClaw agent into a dedicated, portable voice device. Speak naturally, send requests over Wi‑Fi, and receive answers through a small prototype built for local-first experimentation.
 
 ### Social post draft
 
-Meet ClawBuddy: a pocketable voice device for OpenClaw. It gives your agent a dedicated button, a friendly screen, and a safer prototype path with device allowlisting and OTA-ready docs. Built for makers who want agent access without opening another app.
+Meet myAI: a pocketable voice device for OpenClaw. It gives your agent a dedicated button, a friendly screen, and a safer prototype path with device allowlisting and OTA-ready docs. Built for makers who want agent access without opening another app.
 
 ### Landing page hero copy
 
 **Your OpenClaw companion, always within reach.**
 
-ClawBuddy is a small handheld voice device that connects to an OpenClaw agent. Tap, talk, and get help through a focused prototype built for builders, demos, and local-first experiments.
+myAI is a small handheld voice device that connects to an OpenClaw agent. Tap, talk, and get help through a focused prototype built for builders, demos, and local-first experiments.
 
 **Call to action:** Explore the prototype
 
@@ -99,5 +99,5 @@ ClawBuddy is a small handheld voice device that connects to an OpenClaw agent. T
 - Gives voice-agent workflows a dedicated physical interface.
 - Keeps the prototype understandable with clear docs, diagrams, and local tooling.
 - Supports device identity and allowlisting so access can be deliberate.
-- Separates ClawBuddy development from production OpenClaw deployments.
+- Separates myAI development from production OpenClaw deployments.
 - Makes demos easier: one device, one button, one clear interaction loop.

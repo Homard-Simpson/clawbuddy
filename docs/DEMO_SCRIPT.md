@@ -1,6 +1,6 @@
-# ClawBuddy Demo Script
+# myAI Demo Script
 
-Goal: show that ClawBuddy is becoming a real product without risking the live prototype bridge.
+Goal: show that myAI is becoming a real product without risking the live prototype bridge.
 
 ## 1. Show separation
 
@@ -39,7 +39,7 @@ bin/clawbuddy tune forgiving
 
 Explain:
 
-- These change ClawBuddy product config only.
+- These change myAI product config only.
 - They do not touch the live bridge.
 - `forgiving` matches the better-feeling prototype setting.
 
@@ -60,7 +60,7 @@ Expected:
 
 ## 5. Voice-path demo on live prototype
 
-Use the actual ESP voice device, not ClawBuddy runtime yet:
+Use the actual ESP voice device, not myAI runtime yet:
 
 - “Device status.”
 - “Set your text size bigger.”
@@ -70,7 +70,7 @@ Use the actual ESP voice device, not ClawBuddy runtime yet:
 
 ## 6. Product story
 
-ClawBuddy is no longer just an idea. It has:
+myAI is no longer just an idea. It has:
 
 - a target device
 - a security model

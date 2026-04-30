@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/branding/assets/clawbuddy-logo.svg" alt="ClawBuddy — Your OpenClaw companion, always within reach" width="560">
+  <img src="docs/branding/assets/myai-logo.svg" alt="myAI — Your OpenClaw companion, always within reach" width="560">
 </p>
 
 <p align="center">
@@ -9,42 +9,42 @@
   <img alt="Local-first" src="https://img.shields.io/badge/local--first-OpenClaw-0F172A?style=flat-square">
 </p>
 
-# ClawBuddy
+# myAI
 
 **Your OpenClaw companion, always within reach.**
 
-ClawBuddy is a small handheld voice device for reaching your OpenClaw agent without opening a laptop or phone. Press, talk naturally, and let the ESP32-S3 prototype send your request over Wi‑Fi to a ClawBuddy/OpenClaw server; the answer comes back to the device.
+myAI is a small handheld voice device for reaching your OpenClaw agent without opening a laptop or phone. Press, talk naturally, and let the ESP32-S3 prototype send your request over Wi‑Fi to a myAI/OpenClaw server; the answer comes back to the device.
 
-This repo is the public-safe prototype workspace: firmware, local tools, setup docs, diagrams, and the [ClawBuddy brand kit](docs/branding/README.md) in one place. It is meant to be understandable, flashable, and safe to experiment with, but it is not a finished consumer product yet.
+This repo is the public-safe prototype workspace: firmware, local tools, setup docs, diagrams, and the [myAI brand kit](docs/branding/README.md) in one place. It is meant to be understandable, flashable, and safe to experiment with, but it is not a finished consumer product yet.
 
 ## What it does today
 
 - Provides prototype firmware for the **Waveshare ESP32-S3 Touch AMOLED 1.8**.
-- Provides a small local ClawBuddy CLI and status server.
-- Keeps ClawBuddy development separate from any production OpenClaw voice bridge.
+- Provides a small local myAI CLI and status server.
+- Keeps myAI development separate from any production OpenClaw voice bridge.
 - Documents the planned device → server → OpenClaw flow, OTA updates, and optional vision camera setup.
 - Includes a lightweight public-safe [brand kit and logo assets](docs/branding/README.md) for docs, ads, and launch materials.
 
 ## How the pieces fit together
 
-![ClawBuddy interaction flow](docs/assets/clawbuddy-interaction-flow.svg)
+![myAI interaction flow](docs/assets/clawbuddy-interaction-flow.svg)
 
 Short version:
 
-1. You talk to the ClawBuddy device.
+1. You talk to the myAI device.
 2. The device connects over Wi‑Fi.
-3. Audio/control messages go to the ClawBuddy/OpenClaw server over WebSocket.
+3. Audio/control messages go to the myAI/OpenClaw server over WebSocket.
 4. The server talks to an OpenClaw agent.
 5. The answer is sent back to the device.
 6. Optional OTA updates let the device safely receive newer firmware.
 
 Optional camera and first-time setup paths:
 
-![ClawBuddy setup paths](docs/assets/clawbuddy-setup-paths.svg)
+![myAI setup paths](docs/assets/clawbuddy-setup-paths.svg)
 
 Illustrative device screens:
 
-![Illustrative ClawBuddy screen mockups](docs/assets/clawbuddy-screen-mockups.svg)
+![Illustrative myAI screen mockups](docs/assets/clawbuddy-screen-mockups.svg)
 
 These are documentation mockups, not real device photos or captured screenshots.
 
@@ -59,7 +59,7 @@ You only need:
 - Python 3.
 - This repository.
 
-This path checks the local ClawBuddy tools. It does **not** flash a device.
+This path checks the local myAI tools. It does **not** flash a device.
 
 ### For firmware building/flashing
 
@@ -104,9 +104,9 @@ make test
 
 What each command does:
 
-- `make status` prints the local ClawBuddy configuration and checks that planned prototype ports are free.
+- `make status` prints the local myAI configuration and checks that planned prototype ports are free.
 - `make profiles` lists voice-input tuning presets.
-- `bin/clawbuddy tune forgiving` chooses a more patient listening preset for softer voices or longer pauses. It edits ClawBuddy’s local runtime config only.
+- `bin/clawbuddy tune forgiving` chooses a more patient listening preset for softer voices or longer pauses. It edits myAI’s local runtime config only.
 - `make test` runs the lightweight repo checks.
 
 Other useful commands:
@@ -139,14 +139,14 @@ What this does:
 
 - `bin/clawbuddy-server` starts a local-only HTTP status server.
 - `/health` returns a simple “is the server alive?” response.
-- `/status` returns ClawBuddy status as JSON.
+- `/status` returns myAI status as JSON.
 - `/profiles` returns the available voice tuning profiles as JSON.
 
 The server binds to `127.0.0.1` by default, so it is only reachable from your own computer.
 
 ## Pair a device (simple prototype flow)
 
-A ClawBuddy device is **unpaired** until its public identity is approved by the server allowlist. Unpaired devices get `403 forbidden` from OTA and do not receive websocket/server settings. A **paired** device has both values approved:
+A myAI device is **unpaired** until its public identity is approved by the server allowlist. Unpaired devices get `403 forbidden` from OTA and do not receive websocket/server settings. A **paired** device has both values approved:
 
 - `device-id`: the device Wi-Fi MAC address, for example `aa:bb:cc:dd:ee:ff`
 - `client-id`: the firmware UUID, for example `00000000-0000-4000-8000-000000000000`
@@ -155,7 +155,7 @@ These are identifiers, not passwords. Do not publish real ones in issues or docs
 
 ### Easiest local pairing page
 
-Run this on the Mac/Linux machine that owns the ClawBuddy server config:
+Run this on the Mac/Linux machine that owns the myAI server config:
 
 ```bash
 bin/clawbuddy-server
@@ -218,7 +218,7 @@ What this does:
 - Installs support for the ESP32-S3 chip.
 - Adds the ESP-IDF tools to your current terminal session.
 
-### 2. Build ClawBuddy firmware
+### 2. Build myAI firmware
 
 ```bash
 cd clawbuddy/firmware/clawbuddy
@@ -228,7 +228,7 @@ cd clawbuddy/firmware/clawbuddy
 What this does:
 
 - Enters the firmware folder.
-- Runs the ClawBuddy build wrapper.
+- Runs the myAI build wrapper.
 - Produces firmware files under the firmware build directory.
 
 If ESP-IDF is installed somewhere else:
@@ -263,27 +263,27 @@ After flashing:
 1. Keep the device connected by USB.
 2. Watch the screen and serial monitor for Wi‑Fi/setup instructions.
 3. Connect the device to your Wi‑Fi using the prompts provided by the firmware.
-4. Point it at your ClawBuddy/OpenClaw server when that runtime is ready.
+4. Point it at your myAI/OpenClaw server when that runtime is ready.
 
 For public prototypes, avoid putting secrets, personal hostnames, or private network names in committed files.
 
 ## Make it work anywhere with Tailscale
 
-If you want ClawBuddy to work outside your home network, use Tailscale Funnel/Serve on the Mac or server that runs OpenClaw.
+If you want myAI to work outside your home network, use Tailscale Funnel/Serve on the Mac or server that runs OpenClaw.
 
 Plain English:
 
-- ClawBuddy joins any normal Wi‑Fi network.
+- myAI joins any normal Wi‑Fi network.
 - Your Mac/server stays on Tailscale.
 - Tailscale gives the server an HTTPS address.
-- ClawBuddy calls that HTTPS OTA URL, then receives the websocket/server details from OTA.
+- myAI calls that HTTPS OTA URL, then receives the websocket/server details from OTA.
 - Unpaired devices are rejected by the OTA allowlist, so a public Funnel URL does not mean public access to Claw/OpenClaw.
 
-![ClawBuddy Tailscale anywhere flow](docs/assets/clawbuddy-tailscale-anywhere.svg)
+![myAI Tailscale anywhere flow](docs/assets/clawbuddy-tailscale-anywhere.svg)
 
 Read the full guide: [`docs/TAILSCALE_SETUP.md`](docs/TAILSCALE_SETUP.md).
 
-Security model in one sentence: **Tailscale Funnel makes the ClawBuddy doorway reachable, but only paired/approved devices get the keys.**
+Security model in one sentence: **Tailscale Funnel makes the myAI doorway reachable, but only paired/approved devices get the keys.**
 
 During OTA, the device sends `device-id` and `client-id`; the server checks those against its allowlist. Unknown devices get `403 forbidden` and do not receive firmware download access or websocket/server config.
 
@@ -295,7 +295,7 @@ https://<your-tailnet-host>:<https-port>/xiaozhi/ota/
 
 For normal setup, enter that URL on the device setup page:
 
-1. Join the temporary `ClawBuddy-XXXX` Wi‑Fi setup network.
+1. Join the temporary `myAI-XXXX` Wi‑Fi setup network.
 2. Open the captive portal or `http://192.168.4.1`.
 3. On **Advanced**, set **Custom OTA URL** to your Tailscale Funnel HTTPS URL, for example `https://your-clawbuddy-host.example.com/clawbuddy/ota/`.
 4. Leave it blank to use the firmware build default.
@@ -304,7 +304,7 @@ The optional **Voice server WebSocket URL** field is only for manual overrides; 
 
 ## Optional HT-HC33 vision camera
 
-The camera prototype is separate from the main ClawBuddy device.
+The camera prototype is separate from the main myAI device.
 
 Typical first-time setup:
 
@@ -319,7 +319,7 @@ See `camera/README.md` for camera-specific notes.
 
 ### Multi-camera scene bundles
 
-ClawBuddy keeps a local OpenClaw Vision camera registry in `config/vision-cameras.local.json` when present, otherwise `config/vision-cameras.example.json`.
+myAI keeps a local OpenClaw Vision camera registry in `config/vision-cameras.local.json` when present, otherwise `config/vision-cameras.example.json`.
 
 Useful commands:
 
@@ -348,9 +348,9 @@ Install Python 3, then try again.
 
 ### `make status` says a port is not free
 
-Another program is already using one of ClawBuddy’s planned local ports.
+Another program is already using one of myAI’s planned local ports.
 
-Close the other program or change the ClawBuddy runtime config. The default prototype ports are documented in `ops/RUNTIME_PORTS_AND_LABELS.md`.
+Close the other program or change the myAI runtime config. The default prototype ports are documented in `ops/RUNTIME_PORTS_AND_LABELS.md`.
 
 ### `idf.py` is not found
 
@@ -408,14 +408,14 @@ Check the camera serial monitor. The setup network name and password are printed
 
 ## Repo layout
 
-- `bin/` — local ClawBuddy CLI and status server prototypes.
+- `bin/` — local myAI CLI and status server prototypes.
 - `config/` — runtime config and voice tuning profiles.
-- `firmware/clawbuddy/` — ClawBuddy firmware for the target ESP32-S3 device.
+- `firmware/clawbuddy/` — myAI firmware for the target ESP32-S3 device.
 - `camera/` — optional camera prototypes.
 - `hardware/` — target board notes.
-- `bridge/` — future standalone ClawBuddy server/bridge code.
+- `bridge/` — future standalone myAI server/bridge code.
 - `ops/` — security, ports, status contracts, and operational notes.
-- `docs/` — demos, handoff notes, diagrams, and the [ClawBuddy brand kit](docs/branding/README.md).
+- `docs/` — demos, handoff notes, diagrams, and the [myAI brand kit](docs/branding/README.md).
 
 ## Safety and privacy notes
 
@@ -427,7 +427,7 @@ Important defaults for public prototypes:
 - Use allowlisted devices where possible.
 - Use signed or expiring URLs for firmware downloads.
 - Do not commit secrets, tokens, personal domains, private hostnames, private IP plans, or personal contact details.
-- Keep ClawBuddy development isolated from any production voice bridge until migration is deliberate and tested.
+- Keep myAI development isolated from any production voice bridge until migration is deliberate and tested.
 
 ## License and attribution
 

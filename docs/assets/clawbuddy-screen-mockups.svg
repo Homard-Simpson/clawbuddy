@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1120" height="520" viewBox="0 0 1120 520" role="img" aria-labelledby="title desc">
-  <title id="title">Illustrative ClawBuddy screen mockups</title>
-  <desc id="desc">Illustrative, not real screenshots, showing possible ClawBuddy device screens for listening, answering, and setup.</desc>
+  <title id="title">Illustrative myAI screen mockups</title>
+  <desc id="desc">Illustrative, not real screenshots, showing possible myAI device screens for listening, answering, and setup.</desc>
   <defs>
     <style>
       .bg{fill:#f8fafc}.device{fill:#111827;stroke:#020617;stroke-width:3}.screen{fill:#0f172a}.screen2{fill:#172554}.screen3{fill:#14532d}.title{font:700 22px system-ui,-apple-system,Segoe UI,sans-serif;fill:#0f172a}.note{font:14px system-ui,-apple-system,Segoe UI,sans-serif;fill:#475569}.uiTitle{font:700 18px system-ui,-apple-system,Segoe UI,sans-serif;fill:#fff}.uiText{font:14px system-ui,-apple-system,Segoe UI,sans-serif;fill:#dbeafe}.chip{fill:#38bdf8}.chip2{fill:#22c55e}.button{fill:#334155;stroke:#94a3b8}.caption{font:600 16px system-ui,-apple-system,Segoe UI,sans-serif;fill:#0f172a}.small{font:12px system-ui,-apple-system,Segoe UI,sans-serif;fill:#64748b}

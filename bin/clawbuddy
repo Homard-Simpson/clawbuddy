@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ClawBuddy product CLI.
+"""myAI product CLI.
 
 Safe by default: operates on products/clawbuddy config only. Live prototype inspection is read-only and requires --live.
 """
@@ -391,7 +391,7 @@ def product_status(include_live: bool = False) -> dict[str, Any]:
     return result
 
 def print_status(data: dict[str, Any]) -> None:
-    print("ClawBuddy")
+    print("myAI")
     print(f"root: {data['root']}")
     print(f"runtime: {data['runtimeConfig']}")
     print(f"profile: {data['profile']} ({'ok' if data['profileValid'] else 'INVALID'})")
@@ -442,7 +442,7 @@ def cmd_tune(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps({"updated": str(RUNTIME_LOCAL), "profile": args.profile, "liveMutated": False}, indent=2))
     else:
-        print(f"Set ClawBuddy product profile to {args.profile} in {RUNTIME_LOCAL}")
+        print(f"Set myAI product profile to {args.profile} in {RUNTIME_LOCAL}")
         print("Live prototype bridge was not changed.")
     return 0
 
@@ -535,7 +535,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="clawbuddy", description="ClawBuddy product CLI")
+    p = argparse.ArgumentParser(prog="clawbuddy", description="myAI product CLI")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("status", help="Show product runtime status")
@@ -565,7 +565,7 @@ def build_parser() -> argparse.ArgumentParser:
     vision_sub.add_parser("scene-prompt", help="Print the scene-description policy for multimodal callers")
     sp.set_defaults(func=cmd_vision)
 
-    sp = sub.add_parser("pair", help="Pair/allowlist a ClawBuddy device locally; does not mutate live services")
+    sp = sub.add_parser("pair", help="Pair/allowlist a myAI device locally; does not mutate live services")
     pair_sub = sp.add_subparsers(dest="pair_cmd", required=True)
     pair_add = pair_sub.add_parser("add", help="Approve a device-id/client-id pair")
     pair_add.add_argument("device_id", help="Device-Id MAC address from setup page, serial logs, or OTA 403 logs")

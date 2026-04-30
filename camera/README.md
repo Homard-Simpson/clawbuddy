@@ -1,6 +1,6 @@
 # Camera prototypes
 
-This folder contains local camera firmware prototypes used by ClawBuddy.
+This folder contains local camera firmware prototypes used by myAI.
 
 ## HT-HC33 OpenClaw Vision
 
@@ -19,7 +19,7 @@ Security note: default HT-HC33 builds use a per-device setup AP password printed
 
 ## Multi-camera scene behavior
 
-The ClawBuddy CLI/server camera registry lives at `config/vision-cameras.local.json` if present, falling back to `config/vision-cameras.example.json`. It should include every OpenClaw Vision firmware camera ClawBuddy is allowed to use.
+The myAI CLI/server camera registry lives at `config/vision-cameras.local.json` if present, falling back to `config/vision-cameras.example.json`. It should include every OpenClaw Vision firmware camera myAI is allowed to use.
 
 Run:
 

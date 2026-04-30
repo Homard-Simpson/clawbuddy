@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1120" height="520" viewBox="0 0 1120 520" role="img" aria-labelledby="title desc">
-  <title id="title">ClawBuddy interaction flow</title>
-  <desc id="desc">A user talks to a ClawBuddy device. The device uses Wi-Fi, WebSocket, and OTA paths to reach a ClawBuddy OpenClaw server, which talks to an OpenClaw agent and returns a response.</desc>
+  <title id="title">myAI interaction flow</title>
+  <desc id="desc">A user talks to a myAI device. The device uses Wi-Fi, WebSocket, and OTA paths to reach a myAI OpenClaw server, which talks to an OpenClaw agent and returns a response.</desc>
   <defs>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
       <path d="M2,2 L10,6 L2,10 Z" fill="#3056d3"/>
@@ -10,7 +10,7 @@
     </style>
   </defs>
   <rect class="bg" width="1120" height="520" rx="24"/>
-  <text x="40" y="48" class="title">ClawBuddy: from voice request to answer</text>
+  <text x="40" y="48" class="title">myAI: from voice request to answer</text>
   <text x="40" y="76" class="small">Public prototype architecture. Labels describe roles, not private hostnames or production infrastructure.</text>
 
   <rect x="45" y="145" width="160" height="145" rx="18" class="card"/>
@@ -23,7 +23,7 @@
   <rect x="325" y="148" width="80" height="116" rx="14" fill="#111827"/>
   <rect x="337" y="163" width="56" height="72" rx="8" fill="#60a5fa"/>
   <circle cx="365" cy="249" r="6" fill="#e5e7eb"/>
-  <text x="365" y="326" text-anchor="middle" class="label">ClawBuddy device</text>
+  <text x="365" y="326" text-anchor="middle" class="label">myAI device</text>
   <text x="365" y="350" text-anchor="middle" class="small">ESP32-S3 handheld</text>
 
   <rect x="520" y="120" width="210" height="190" rx="18" class="card"/>
@@ -33,7 +33,7 @@
   <text x="625" y="248" text-anchor="middle" class="small">Local-first by default</text>
 
   <rect x="800" y="105" width="230" height="220" rx="18" class="accent"/>
-  <text x="915" y="150" text-anchor="middle" class="label">ClawBuddy / OpenClaw server</text>
+  <text x="915" y="150" text-anchor="middle" class="label">myAI / OpenClaw server</text>
   <text x="915" y="184" text-anchor="middle" class="small">receives device messages</text>
   <text x="915" y="210" text-anchor="middle" class="small">checks device identity</text>
   <text x="915" y="236" text-anchor="middle" class="small">offers OTA firmware path</text>

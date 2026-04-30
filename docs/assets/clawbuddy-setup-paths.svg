@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1120" height="620" viewBox="0 0 1120 620" role="img" aria-labelledby="title desc">
-  <title id="title">ClawBuddy setup paths</title>
-  <desc id="desc">Diagram showing normal ClawBuddy device setup, optional HT-HC33 camera setup access point, and local OpenClaw server connection.</desc>
+  <title id="title">myAI setup paths</title>
+  <desc id="desc">Diagram showing normal myAI device setup, optional HT-HC33 camera setup access point, and local OpenClaw server connection.</desc>
   <defs>
     <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
       <path d="M2,2 L10,6 L2,10 Z" fill="#2563eb"/>
@@ -10,8 +10,8 @@
     </style>
   </defs>
   <rect class="bg" width="1120" height="620" rx="24"/>
-  <text x="40" y="48" class="title">ClawBuddy first-time setup paths</text>
-  <text x="40" y="76" class="small">The device and optional camera are configured separately, then both can talk to the local ClawBuddy/OpenClaw server.</text>
+  <text x="40" y="48" class="title">myAI first-time setup paths</text>
+  <text x="40" y="76" class="small">The device and optional camera are configured separately, then both can talk to the local myAI/OpenClaw server.</text>
 
   <rect x="60" y="130" width="210" height="135" rx="18" class="blue"/>
   <text x="165" y="168" text-anchor="middle" class="label">Main device</text>
@@ -25,7 +25,7 @@
   <text x="485" y="240" text-anchor="middle" class="small">avoid committed secrets</text>
 
   <rect x="700" y="128" width="270" height="138" rx="18" class="blue"/>
-  <text x="835" y="166" text-anchor="middle" class="label">ClawBuddy/OpenClaw server</text>
+  <text x="835" y="166" text-anchor="middle" class="label">myAI/OpenClaw server</text>
   <text x="835" y="198" text-anchor="middle" class="small">local status API</text>
   <text x="835" y="224" text-anchor="middle" class="small">WebSocket + OTA routes</text>
 

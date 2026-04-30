@@ -1,8 +1,8 @@
-# ClawBuddy Prototype Handoff
+# myAI Prototype Handoff
 
 ## What is showable now
 
-ClawBuddy now has a separate product folder with:
+myAI now has a separate product folder with:
 
 - Product brief and hardware target.
 - Separation plan so the live prototype bridge stays untouched.
@@ -35,5 +35,5 @@ ClawBuddy now has a separate product folder with:
 
 ## Next implementation step
 
-Build a separate local ClawBuddy runtime on ports `8100/8103/8104/8199`, initially LAN/local-only.
+Build a separate local myAI runtime on ports `8100/8103/8104/8199`, initially LAN/local-only.
 Do not point the ESP at it until `clawbuddy status` is clean and the live prototype bridge has a rollback path.

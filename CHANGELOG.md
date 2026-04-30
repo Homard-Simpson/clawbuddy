@@ -1,4 +1,4 @@
-# ClawBuddy Changelog
+# myAI Changelog
 
 ## 2026-04-30 — myAI loading polish
 
@@ -34,15 +34,15 @@
 
 ## 2026-04-25
 
-- Captured live upstream prototype voice-input improvement as a ClawBuddy product requirement.
+- Captured live upstream prototype voice-input improvement as a myAI product requirement.
 - Product should support a named voice-input tuning profile instead of requiring manual YAML edits.
 - Current live prototype tuning that feels better: Silero VAD `threshold: 0.40`, `threshold_low: 0.20`, `min_silence_duration_ms: 900`, with ESP/server audio aligned at 16 kHz.
 
 ## 2026-04-24
 
-- Created ClawBuddy product folder and brief.
-- Defined ClawBuddy as “OpenClaw on the go” using ESP32-S3 Touch-AMOLED-1.8.
-- Set separation rule: live upstream prototype bridge remains operational; ClawBuddy work stays isolated under `products/clawbuddy/`.
+- Created myAI product folder and brief.
+- Defined myAI as “OpenClaw on the go” using ESP32-S3 Touch-AMOLED-1.8.
+- Set separation rule: live upstream prototype bridge remains operational; myAI work stays isolated under `products/clawbuddy/`.
 - Captured security-first posture: public only where required, allowlisted device/client identity, signed/expiring OTA/firmware URLs, no public dashboards.
 
 ## 2026-04-25 — product scaffold
