@@ -21,7 +21,6 @@
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 LV_FONT_DECLARE(font_awesome_30_4);
-LV_FONT_DECLARE(font_puhui_basic_14_1);
 LV_FONT_DECLARE(font_puhui_basic_30_4);
 
 static lv_obj_t* CreateMyAILogo(lv_obj_t* parent, LvglTheme* theme) {
@@ -486,7 +485,6 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_width(status_label_, LV_HOR_RES * 0.8);
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(status_label_, &font_puhui_basic_14_1, 0);
     lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(status_label_, "myAI");
     lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
@@ -907,7 +905,6 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_width(status_label_, LV_HOR_RES * 56 / 100);
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(status_label_, &font_puhui_basic_14_1, 0);
     lv_obj_set_style_text_color(status_label_, lvgl_theme->border_color(), 0);
     lv_label_set_text(status_label_, "myAI");
 
@@ -1208,10 +1205,6 @@ void LcdDisplay::ClearChatMessages() {
 
 void LcdDisplay::SetStatus(const char* status) {
     LvglDisplay::SetStatus(status);
-    DisplayLockGuard lock(this);
-    if (status_label_ != nullptr) {
-        lv_obj_set_style_text_font(status_label_, &font_puhui_basic_14_1, 0);
-    }
 }
 
 void LcdDisplay::SetEmotion(const char* emotion) {
@@ -1421,10 +1414,6 @@ void LcdDisplay::SetTheme(Theme* theme) {
     if (chat_message_label_ != nullptr) {
         lv_obj_set_style_text_color(chat_message_label_, lvgl_theme->text_color(), 0);
     }
-    if (status_label_ != nullptr) {
-        lv_obj_set_style_text_font(status_label_, &font_puhui_basic_14_1, 0);
-    }
-    
     if (emoji_label_ != nullptr) {
         lv_obj_set_style_text_color(emoji_label_, lvgl_theme->border_color(), 0);
     }
