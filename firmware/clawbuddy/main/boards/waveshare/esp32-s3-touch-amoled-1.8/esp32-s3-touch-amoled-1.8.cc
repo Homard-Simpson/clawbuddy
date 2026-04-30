@@ -34,6 +34,8 @@
 
 #define TAG "WaveshareEsp32s3TouchAMOLED1inch8"
 
+LV_FONT_DECLARE(font_puhui_basic_30_4);
+
 class Pmic : public Axp2101 {
 public:
     Pmic(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : Axp2101(i2c_bus, addr) {
@@ -105,6 +107,7 @@ private:
 
         camera_status_label_ = lv_label_create(camera_overlay_);
         lv_label_set_text(camera_status_label_, "Loading camera...");
+        lv_obj_set_style_text_font(camera_status_label_, &font_puhui_basic_30_4, 0);
         lv_obj_set_style_text_color(camera_status_label_, lv_color_white(), 0);
         lv_obj_align(camera_status_label_, LV_ALIGN_CENTER, 0, 0);
 
@@ -113,7 +116,7 @@ private:
         lv_obj_add_flag(camera_image_, LV_OBJ_FLAG_HIDDEN);
 
         lv_obj_t* back_btn = lv_button_create(camera_overlay_);
-        lv_obj_set_size(back_btn, 96, 42);
+        lv_obj_set_size(back_btn, 118, 56);
         lv_obj_align(back_btn, LV_ALIGN_TOP_LEFT, 10, 10);
         lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x1f2937), 0);
         lv_obj_set_style_bg_opa(back_btn, LV_OPA_90, 0);
@@ -127,6 +130,7 @@ private:
 
         lv_obj_t* back_label = lv_label_create(back_btn);
         lv_label_set_text(back_label, "Back");
+        lv_obj_set_style_text_font(back_label, &font_puhui_basic_30_4, 0);
         lv_obj_set_style_text_color(back_label, lv_color_white(), 0);
         lv_obj_center(back_label);
     }

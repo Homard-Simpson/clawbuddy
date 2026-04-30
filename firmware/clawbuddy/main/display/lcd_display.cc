@@ -23,6 +23,12 @@ LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 LV_FONT_DECLARE(font_awesome_30_4);
 LV_FONT_DECLARE(font_puhui_basic_30_4);
 
+static void ApplyReadableTextFont(lv_obj_t* obj, const lv_font_t* font) {
+    if (obj != nullptr && font != nullptr) {
+        lv_obj_set_style_text_font(obj, font, 0);
+    }
+}
+
 static lv_obj_t* CreateMyAILogo(lv_obj_t* parent, LvglTheme* theme) {
     lv_obj_t* logo = lv_obj_create(parent);
     lv_obj_set_size(logo, 142, 112);
@@ -517,6 +523,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_bg_color(low_battery_popup_, lvgl_theme->low_battery_color(), 0);
     lv_obj_set_style_radius(low_battery_popup_, lvgl_theme->spacing(4), 0);
     low_battery_label_ = lv_label_create(low_battery_popup_);
+    ApplyReadableTextFont(low_battery_label_, text_font);
     lv_label_set_text(low_battery_label_, Lang::Strings::BATTERY_NEED_CHARGE);
     lv_obj_set_style_text_color(low_battery_label_, lv_color_white(), 0);
     lv_obj_center(low_battery_label_);
@@ -607,6 +614,7 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
 
     // Create the message text
     lv_obj_t* msg_text = lv_label_create(msg_bubble);
+    ApplyReadableTextFont(msg_text, lvgl_theme->text_font()->font());
     lv_label_set_text(msg_text, content);
     
     // Calculate bubble width constraints
@@ -865,7 +873,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_bg_color(container_, lvgl_theme->background_color(), 0);
     lv_obj_set_style_border_color(container_, lvgl_theme->border_color(), 0);
 
-    const lv_coord_t top_bar_h = text_font->line_height + lvgl_theme->spacing(8);
+    const lv_coord_t top_bar_h = text_font->line_height + lvgl_theme->spacing(10);
 
     /* Single compact top bar: Wi-Fi left, status/time center, battery/mute right. */
     emoji_box_ = nullptr;
@@ -895,21 +903,23 @@ void LcdDisplay::SetupUI() {
     lv_obj_align(top_bar_, LV_ALIGN_TOP_MID, 0, 0);
 
     network_label_ = lv_label_create(top_bar_);
-    lv_obj_set_width(network_label_, LV_HOR_RES * 18 / 100);
+    lv_obj_set_width(network_label_, LV_HOR_RES * 15 / 100);
     lv_label_set_text(network_label_, "");
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
     lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_text_align(network_label_, LV_TEXT_ALIGN_LEFT, 0);
 
     status_label_ = lv_label_create(top_bar_);
-    lv_obj_set_width(status_label_, LV_HOR_RES * 56 / 100);
+    lv_obj_set_width(status_label_, LV_HOR_RES * 50 / 100);
+    ApplyReadableTextFont(status_label_, text_font);
     lv_label_set_long_mode(status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(status_label_, lvgl_theme->border_color(), 0);
     lv_label_set_text(status_label_, "myAI");
 
     notification_label_ = lv_label_create(top_bar_);
-    lv_obj_set_width(notification_label_, LV_HOR_RES * 56 / 100);
+    lv_obj_set_width(notification_label_, LV_HOR_RES * 50 / 100);
+    ApplyReadableTextFont(notification_label_, text_font);
     lv_label_set_long_mode(notification_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(notification_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(notification_label_, lvgl_theme->text_color(), 0);
@@ -917,7 +927,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t* right_icons = lv_obj_create(top_bar_);
-    lv_obj_set_width(right_icons, LV_HOR_RES * 18 / 100);
+    lv_obj_set_width(right_icons, LV_HOR_RES * 25 / 100);
     lv_obj_set_height(right_icons, LV_SIZE_CONTENT);
     lv_obj_set_style_bg_opa(right_icons, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(right_icons, 0, 0);
@@ -973,6 +983,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_radius(low_battery_popup_, lvgl_theme->spacing(4), 0);
     
     low_battery_label_ = lv_label_create(low_battery_popup_);
+    ApplyReadableTextFont(low_battery_label_, text_font);
     lv_label_set_text(low_battery_label_, Lang::Strings::BATTERY_NEED_CHARGE);
     lv_obj_set_style_text_color(low_battery_label_, lv_color_white(), 0);
     lv_obj_center(low_battery_label_);
@@ -1117,6 +1128,7 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     lv_obj_set_scrollbar_mode(bubble, LV_SCROLLBAR_MODE_OFF);
 
     lv_obj_t* label = lv_label_create(bubble);
+    ApplyReadableTextFont(label, lvgl_theme->text_font()->font());
     lv_label_set_text(label, content);
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
 

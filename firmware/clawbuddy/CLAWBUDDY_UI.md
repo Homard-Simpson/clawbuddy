@@ -55,3 +55,9 @@ Short, device-native English:
 - English strings are in `main/assets/locales/en-US/language.json`.
 - Generated header is `main/assets/lang_config.h` via `scripts/gen_lang.py`.
 - WeChat style remains disabled in `sdkconfig` and board `config.json`.
+
+## 2026-04-30 readability OTA
+
+- `0.1.15-myai` forces normal 30px built-in text on visible myAI firmware UI labels: status/time, notifications, chat bubbles, low-battery popup, camera loading, and camera Back button.
+- Long status/notification text still uses circular scrolling instead of shrinking or wrapping into tiny text.
+- OTA staged as `esp32-s3-touch-amoled-1.8_0.1.15-myai.bin` for the live Xiaozhi OTA server.
