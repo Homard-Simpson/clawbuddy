@@ -558,11 +558,14 @@ void Application::InitializeProtocol() {
                             SetDeviceState(kDeviceStateIdle);
                         }
                     } else if (GetDeviceState() == kDeviceStateSpeaking) {
-                        if (listening_mode_ == kListeningModeManualStop) {
-                            SetDeviceState(kDeviceStateIdle);
-                        } else {
-                            SetDeviceState(kDeviceStateListening);
-                        }
+                        // Do not flip the UI/mic back to Listening while the assistant audio
+                        // is still playing. That made the device look ready, then server-side
+                        // voice turns could hit the "still working / try later" path.
+                        audio_service_.WaitForPlaybackQueueEmpty();
+                        // After the assistant has fully finished speaking, resume listening.
+                        // The important part is that this happens after actual playback drains,
+                        // not at TTS stop time while audio is still coming out.
+                        SetDeviceState(kDeviceStateListening);
                     }
                 });
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
@@ -794,7 +797,9 @@ void Application::HandleStartListeningEvent() {
         listening_mode_ = kListeningModeManualStop;
         listening_start_sent_ = false;
         ptt_stop_requested_ = false;
-        ptt_text_only_response_requested_ = true;
+        // Manual/PTT turns should speak back normally. The previous text-only
+        // PTT path made the device look like it was not responding with audio.
+        ptt_text_only_response_requested_ = false;
         pending_ptt_capture_ = !protocol_->IsAudioChannelOpened();
 
         // Start microphone capture/UI immediately on button-down. If the
@@ -809,9 +814,9 @@ void Application::HandleStartListeningEvent() {
         }
         FlushPendingPttIfReady();
     } else if (state == kDeviceStateSpeaking) {
-        AbortSpeaking(kAbortReasonNone);
-        ptt_text_only_response_requested_ = true;
-        SetListeningMode(kListeningModeManualStop);
+        // Do not let button/PTT interrupt the assistant mid-response.
+        // The device will resume listening after playback finishes.
+        return;
     }
 }
 
@@ -826,6 +831,7 @@ void Application::HandleStopListeningEvent() {
         if (pending_ptt_capture_) {
             ptt_stop_requested_ = true;
             audio_service_.EnableVoiceProcessing(false);
+            Board::GetInstance().GetDisplay()->SetStatus(Lang::Strings::STANDBY);
             FinishPendingPttCapture();
             return;
         }
@@ -864,6 +870,10 @@ void Application::HandleWakeWordDetectedEvent() {
         // Channel already opened, continue directly
         ContinueWakeWordInvoke(wake_word);
     } else if (state == kDeviceStateSpeaking || state == kDeviceStateListening) {
+        if (state == kDeviceStateSpeaking) {
+            // Ignore wake word while speaking; no mid-response interruption.
+            return;
+        }
         AbortSpeaking(kAbortReasonWakeWordDetected);
         // Clear send queue to avoid sending residues to server
         while (audio_service_.PopPacketFromSendQueue());
@@ -982,12 +992,13 @@ void Application::HandleStateChangedEvent() {
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
 
-            if (listening_mode_ != kListeningModeRealtime) {
-                listening_start_sent_ = false;
-                audio_service_.EnableVoiceProcessing(false);
-                // Only AFE wake word can be detected in speaking mode
-                audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
-            }
+            // Assistant turns are half-duplex for ClawBuddy: once the user prompt
+            // is accepted, do not keep the mic/listen path active while TTS is
+            // speaking. Listening resumes only after the playback queue drains.
+            listening_start_sent_ = false;
+            audio_service_.EnableVoiceProcessing(false);
+            // Only AFE wake word can be detected in speaking mode
+            audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             audio_service_.ResetDecoder();
             break;
         case kDeviceStateWifiConfiguring:
@@ -1015,7 +1026,7 @@ bool Application::EnsureListeningSessionStarted() {
     if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
         return false;
     }
-    protocol_->SendStartListening(listening_mode_, ptt_text_only_response_requested_ && listening_mode_ == kListeningModeManualStop);
+    protocol_->SendStartListening(listening_mode_, false);
     listening_start_sent_ = true;
     return true;
 }
@@ -1163,9 +1174,8 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
         // Channel already opened, continue directly
         ContinueWakeWordInvoke(wake_word);
     } else if (state == kDeviceStateSpeaking) {
-        Schedule([this]() {
-            AbortSpeaking(kAbortReasonNone);
-        });
+        // Ignore wake word/button invoke while speaking; resume listening after playback.
+        return;
     } else if (state == kDeviceStateListening) {   
         Schedule([this]() {
             if (protocol_) {

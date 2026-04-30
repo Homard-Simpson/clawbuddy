@@ -297,6 +297,7 @@ void AudioService::AudioOutputTask() {
 
         auto task = std::move(audio_playback_queue_.front());
         audio_playback_queue_.pop_front();
+        audio_output_active_ = true;
         audio_queue_cv_.notify_all();
         lock.unlock();
 
@@ -311,6 +312,11 @@ void AudioService::AudioOutputTask() {
         /* Update the last output time */
         last_output_time_ = std::chrono::steady_clock::now();
         debug_statistics_.playback_count++;
+
+        lock.lock();
+        audio_output_active_ = false;
+        audio_queue_cv_.notify_all();
+        lock.unlock();
 
 #if CONFIG_USE_SERVER_AEC
         /* Record the timestamp for server AEC */
@@ -673,7 +679,7 @@ bool AudioService::IsIdle() {
 void AudioService::WaitForPlaybackQueueEmpty() {
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
     audio_queue_cv_.wait(lock, [this]() { 
-        return service_stopped_ || (audio_decode_queue_.empty() && audio_playback_queue_.empty()); 
+        return service_stopped_ || (audio_decode_queue_.empty() && audio_playback_queue_.empty() && !audio_output_active_);
     });
 }
 
