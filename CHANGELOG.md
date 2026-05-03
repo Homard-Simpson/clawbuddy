@@ -1,5 +1,13 @@
 # myAI Changelog
 
+## 2026-05-02 — long assistant turn OTA 0.1.17
+
+- Bumped firmware to `0.1.17-myai`.
+- Extended the firmware protocol idle timeout from 120 seconds to 1800 seconds so long OpenClaw/tool-using assistant turns can finish and return audio instead of disconnecting early.
+- Built/staged OTA app binary under `firmware/clawbuddy/ota/v0.1.17-myai/`.
+- Built merged release zip `firmware/clawbuddy/releases/v0.1.17-myai_waveshare-esp32-s3-touch-amoled-1.8-myai.zip`.
+- Local OTA endpoint `/myai/ota/` will serve `0.1.17-myai` when `bin/clawbuddy-server` is running.
+
 ## 2026-04-30 — PTT text-only OTA 0.1.16
 
 - Bumped firmware to `0.1.16-myai`.
