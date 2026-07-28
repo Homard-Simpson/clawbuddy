@@ -1,0 +1,5 @@
+0b0065057dc589c4870592b39270f662f25d9dbf6a0b498052c49fdd333c7267  reference-co5300-working-2026-07-27/bootloader.bin
+8ea0a7df0d2fe5d69f6b17b302ae4773ecab954f8a6fd7f2378f34ee05033bd9  reference-co5300-working-2026-07-27/coinbase_amoled_1_8-working-no-charts.bin
+7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f  reference-co5300-working-2026-07-27/ota_data_initial.bin
+3f80ab58dca09b20ba91e880837d1b0a0dcafe0ca08c952b321fce0da5b8cc84  reference-co5300-working-2026-07-27/partition-table.bin
+516c1835a65a393a1e8c2f92a6ef259cfbd6726a2ebe9865b89e2d81bd199bd2  reference-co5300-working-2026-07-27/main-working-no-charts.cc

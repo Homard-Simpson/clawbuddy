@@ -1,0 +1,6 @@
+dependencies:
+  waveshare/esp_lcd_sh8601: 1.0.2
+  espressif/esp_lcd_touch_ft5x06: ~1.0.7
+  espressif/esp_io_expander_tca9554: ==2.0.0
+  espressif/cjson: '*'
+  idf: '>=5.5.2'
