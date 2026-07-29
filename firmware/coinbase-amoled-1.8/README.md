@@ -22,8 +22,8 @@ The board port follows Waveshare's official V2 sources: CO5300 over the unchange
 
 - Polls the HTTPS `/coinbase-device/` route every 30 seconds with both bearer token and device ID authorization.
 - Prices: BTC, SOL, XLM, HYPE, ETH.
-- Loads 60 recent one-minute closes per asset from the read-only feed, then keeps them current with each 30-second refresh. It renders rolling, direction-colored sparklines directly on the prices screen (roughly a one-hour window).
-- Tap any asset row for an enlarged chart; tap the left/right half of that chart to move to the previous/next asset, then tap **PRICES** to return.
+- Loads recent closes for compact direction-colored sparklines on the prices screen.
+- Tap any asset row for an expanded 24-36 candle chart with green/red bodies and wicks, proportional volume bars, high/low and interval/window labels, a live-price marker, and an amber entry line when that asset has an open position. Tap the left/right half to move to the previous/next asset, then tap **PRICES** to return. If candle data is absent or invalid, the expanded page falls back to the prior close-only line chart.
 - Uses a 2x minimum font size, brighter secondary text, and reflowed position/chart metadata for readability on the 1.8-inch panel.
 - Portfolio balance, unrealized P/L, and Coinbase daily realized P/L for the current America/New_York day.
 - Touch **POSITIONS** for all open positions plus positions closed today; touch **REFRESH** for an immediate poll.
@@ -33,6 +33,22 @@ The board port follows Waveshare's official V2 sources: CO5300 over the unchange
 - If no credentials exist, starts the open `ClawBuddy-Coinbase-XXXX` setup AP immediately. If saved networks cannot connect, the same captive portal starts after 45 seconds while station retries continue.
 - Captive DNS sends AP clients to `http://192.168.4.1`; only clients on the AP subnet may use the setup or OTA routes. Saving Wi-Fi moves that network to the front of the saved list and restarts the display.
 - Supports dual-slot wireless OTA with bootloader rollback. OTA is locked by default: physically hold BOOT for 10 seconds to open a five-minute window and show a random six-digit code. The portal accepts only an ESP-IDF image whose project name is `coinbase_amoled_1_8`, validates the complete image before changing the boot slot, and leaves the running slot selected on any failure.
+
+## Candle feed schema
+
+The optional expanded-chart payload is bounded to the newest 36 valid candles per symbol in firmware. The preferred compact schema is:
+
+```json
+{
+  "candle_interval_seconds": 60,
+  "candles": {
+    "BTC": [[1774814400, 68420.1, 68488.0, 68392.4, 68465.7, 12.35]],
+    "SOL": [[1774814400, 188.2, 188.9, 187.8, 188.6, 9042.0]]
+  }
+}
+```
+
+Compact array order is `[timestamp, open, high, low, close, volume]`. Object entries may instead use numeric `timestamp`, `open`, `high`, `low`, `close`, and `volume` fields. Epoch seconds are preferred; epoch milliseconds are accepted and normalized. Series may arrive in either time order. Malformed candles are skipped, duplicate timestamps are replaced, storage is capped at 36, and `price_history` remains the legacy fallback and the source for list-page sparklines. The parser also accepts short object keys (`t/o/h/l/c/v`), `start` as the timestamp key, and the early alias `candles_interval_seconds`; producers should emit the preferred names above.
 
 ## Build
 

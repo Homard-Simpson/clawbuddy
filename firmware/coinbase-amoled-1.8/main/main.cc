@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -53,6 +54,7 @@ static constexpr int PANEL_X_GAP=0x10;
 static constexpr int PHASE_DELAY_MS=BOARD_IS_V1?100:2000;
 static constexpr int BARS_HOLD_MS=BOARD_IS_V1?1500:5000;
 static constexpr int HISTORY_SAMPLES=60;
+static constexpr int CANDLE_SAMPLES=36;
 static constexpr uint32_t REFRESH_MS=30000, STALE_MS=20000;
 static esp_lcd_panel_handle_t panel;
 static esp_lcd_panel_io_handle_t lcd_io;
@@ -63,7 +65,7 @@ static i2c_master_bus_handle_t i2c_bus;
 static esp_io_expander_handle_t io_expander;
 static bool wifi_up=false, detail=false, force_fetch=true;
 static int selected_chart=-1;
-static uint32_t feed_refresh_seconds=30,history_sample_seconds=30;
+static uint32_t feed_refresh_seconds=30,history_sample_seconds=30,candle_interval_seconds=0;
 static uint64_t last_ok_ms=0;
 static int px_row_y[5],px_row_h[5],px_row_asset[5],px_row_n=0;
 // Feed state is produced by a dedicated network task and consumed by the UI loop.
@@ -77,7 +79,13 @@ static volatile int tap_x=-1, tap_y=-1;   // latched new-press from the touch ta
 static bool screen_on=true;                // BOOT long-press display toggle; no auto-timeout
 struct Position { bool open=false; std::string side="-"; double size=0,entry=0,pnl=0; };
 struct ClosedPosition { std::string symbol="-",side="-"; double size=0,pnl=0; };
-struct Asset { const char *name; double price=0; Position pos; double history[HISTORY_SAMPLES]={}; uint8_t history_count=0,history_head=0; explicit Asset(const char*n):name(n){} };
+struct Candle { int64_t timestamp=0; double open=0,high=0,low=0,close=0,volume=0; };
+struct Asset {
+  const char *name; double price=0; Position pos;
+  double history[HISTORY_SAMPLES]={}; uint8_t history_count=0,history_head=0;
+  Candle candles[CANDLE_SAMPLES]={}; uint8_t candle_count=0;
+  explicit Asset(const char*n):name(n){}
+};
 static Asset assets[]={Asset("BTC"),Asset("SOL"),Asset("XLM"),Asset("HYPE"),Asset("ETH")};
 static std::vector<ClosedPosition> closed_today;
 static double balance=0, total_pnl=0, realized_pnl_today=0;
@@ -105,6 +113,7 @@ static void draw_line(int x0,int y0,int x1,int y1,uint16_t c,int thickness=1){
   int dx=abs(x1-x0),sx=x0<x1?1:-1,dy=-abs(y1-y0),sy=y0<y1?1:-1,err=dx+dy;
   while(true){ for(int yy=0;yy<thickness;yy++)pixel(x0,y0+yy,c); if(x0==x1&&y0==y1)break; int e2=2*err; if(e2>=dy){err+=dy;x0+=sx;} if(e2<=dx){err+=dx;y0+=sy;} }
 }
+static double num(cJSON*o,const char*k){ cJSON*x=cJSON_GetObjectItemCaseSensitive(o,k); return cJSON_IsNumber(x)?x->valuedouble:0; }
 static double history_at(const Asset&a,int i){ int start=(a.history_head+HISTORY_SAMPLES-a.history_count)%HISTORY_SAMPLES; return a.history[(start+i)%HISTORY_SAMPLES]; }
 static void push_price(Asset&a,double value){ if(!(value>0)||!std::isfinite(value))return; a.history[a.history_head]=value; a.history_head=(a.history_head+1)%HISTORY_SAMPLES; if(a.history_count<HISTORY_SAMPLES)a.history_count++; }
 static bool load_price_history(Asset&a,cJSON*root){
@@ -122,6 +131,81 @@ static bool history_bounds(const Asset&a,double&lo,double&hi){
   return true;
 }
 static double history_change_pct(const Asset&a){ if(a.history_count<2)return 0; double first=history_at(a,0),last=history_at(a,a.history_count-1); return first?((last-first)/first)*100.0:0; }
+static double chart_change_pct(const Asset&a){
+  if(a.candle_count){ double first=a.candles[0].open,last=a.candles[a.candle_count-1].close; return first?((last-first)/first)*100.0:0; }
+  return history_change_pct(a);
+}
+static double candle_value(cJSON*item,const char*name,const char*short_name,const char*alternate=nullptr){
+  cJSON*x=cJSON_GetObjectItemCaseSensitive(item,name);
+  if(!cJSON_IsNumber(x)&&short_name)x=cJSON_GetObjectItemCaseSensitive(item,short_name);
+  if(!cJSON_IsNumber(x)&&alternate)x=cJSON_GetObjectItemCaseSensitive(item,alternate);
+  return cJSON_IsNumber(x)?x->valuedouble:NAN;
+}
+// Feed candle arrays are compact [timestamp,open,high,low,close,volume]. Object
+// form accepts the long field names; short aliases keep the parser tolerant of
+// size-optimized feeds. Timestamps may be epoch seconds or epoch milliseconds.
+static bool parse_candle(cJSON*item,Candle&out){
+  double ts=NAN,o=NAN,h=NAN,l=NAN,c=NAN,v=NAN;
+  if(cJSON_IsArray(item)&&cJSON_GetArraySize(item)>=6){
+    cJSON*values[6]; for(int i=0;i<6;i++)values[i]=cJSON_GetArrayItem(item,i);
+    if(cJSON_IsNumber(values[0]))ts=values[0]->valuedouble;
+    if(cJSON_IsNumber(values[1]))o=values[1]->valuedouble;
+    if(cJSON_IsNumber(values[2]))h=values[2]->valuedouble;
+    if(cJSON_IsNumber(values[3]))l=values[3]->valuedouble;
+    if(cJSON_IsNumber(values[4]))c=values[4]->valuedouble;
+    if(cJSON_IsNumber(values[5]))v=values[5]->valuedouble;
+  } else if(cJSON_IsObject(item)){
+    ts=candle_value(item,"timestamp","t","start"); o=candle_value(item,"open","o");
+    h=candle_value(item,"high","h"); l=candle_value(item,"low","l");
+    c=candle_value(item,"close","c"); v=candle_value(item,"volume","v");
+  }
+  if(!std::isfinite(ts)||!std::isfinite(o)||!std::isfinite(h)||!std::isfinite(l)||!std::isfinite(c)||!std::isfinite(v)||
+     ts<=0||o<=0||h<=0||l<=0||c<=0||v<0||h<std::max(o,c)||l>std::min(o,c)||l>h)return false;
+  if(ts>10000000000.0)ts/=1000.0; // normalize common epoch-millisecond input
+  out={static_cast<int64_t>(llround(ts)),o,h,l,c,v};
+  return out.timestamp>0;
+}
+// Keep only the newest 36 valid candles, sorted oldest -> newest. This bounds
+// persistent RAM even if a feed accidentally sends a much larger series.
+static bool load_candles(Asset&a,cJSON*root){
+  a.candle_count=0;
+  if(!cJSON_IsObject(root))return false;
+  cJSON*series=cJSON_GetObjectItemCaseSensitive(root,a.name);
+  if(!cJSON_IsArray(series))return false;
+  cJSON*item=nullptr;
+  cJSON_ArrayForEach(item,series){
+    Candle next; if(!parse_candle(item,next))continue;
+    int count=a.candle_count,pos=0;
+    while(pos<count&&a.candles[pos].timestamp<next.timestamp)pos++;
+    if(pos<count&&a.candles[pos].timestamp==next.timestamp){a.candles[pos]=next;continue;}
+    if(count==CANDLE_SAMPLES){
+      if(next.timestamp<=a.candles[0].timestamp)continue;
+      for(int i=1;i<count;i++)a.candles[i-1]=a.candles[i];
+      count--; pos=0; while(pos<count&&a.candles[pos].timestamp<next.timestamp)pos++;
+    }
+    for(int i=count;i>pos;i--)a.candles[i]=a.candles[i-1];
+    a.candles[pos]=next; a.candle_count=static_cast<uint8_t>(count+1);
+  }
+  return a.candle_count>0;
+}
+static bool candle_bounds(const Asset&a,double&lo,double&hi,double&max_volume){
+  if(!a.candle_count)return false;
+  lo=a.candles[0].low; hi=a.candles[0].high; max_volume=0;
+  for(int i=0;i<a.candle_count;i++){ lo=std::min(lo,a.candles[i].low); hi=std::max(hi,a.candles[i].high); max_volume=std::max(max_volume,a.candles[i].volume); }
+  return true;
+}
+static void compact_duration(char*b,size_t n,uint64_t seconds){
+  if(seconds>=86400&&seconds%86400==0)snprintf(b,n,"%lluD",(unsigned long long)(seconds/86400));
+  else if(seconds>=3600&&seconds%3600==0)snprintf(b,n,"%lluH",(unsigned long long)(seconds/3600));
+  else if(seconds>=60&&seconds%60==0)snprintf(b,n,"%lluM",(unsigned long long)(seconds/60));
+  else snprintf(b,n,"%lluS",(unsigned long long)seconds);
+}
+static void candle_window(char*b,size_t n,const Asset&a){
+  if(!candle_interval_seconds){snprintf(b,n,"%u CANDLES",(unsigned)a.candle_count);return;}
+  char interval[16],window[16]; compact_duration(interval,sizeof(interval),candle_interval_seconds);
+  compact_duration(window,sizeof(window),(uint64_t)candle_interval_seconds*a.candle_count);
+  snprintf(b,n,"%s x %u / %s WINDOW",interval,(unsigned)a.candle_count,window);
+}
 static void sparkline(const Asset&a,int x,int y,int w,int h,bool full=false){
   if(full){ for(int i=1;i<4;i++)draw_line(x,y+(h*i)/4,x+w-1,y+(h*i)/4,GRID); }
   else draw_line(x,y+h/2,x+w-1,y+h/2,GRID);
@@ -216,25 +300,72 @@ static void draw(){
     rect(16,top,336,338,CARD);
     text_bold(28,top+8,a.name,WHITE,3);
     fmt_money(b,sizeof(b),a.price); text(28+(int)strlen(a.name)*18+12,top+14,b,AMBER,2);
-    double pct=history_change_pct(a); snprintf(b,sizeof(b),"%+.2f%%",pct); text_right(340,top+14,b,pct>=0?GREEN:RED,2);
-    int gx=32,gy=top+50,gw=304,gh=188;
-    double lo=0,hi=0; bool hb=history_bounds(a,lo,hi);
-    if(a.pos.open&&a.pos.entry>0){ if(!hb){lo=hi=a.pos.entry;hb=true;} else {lo=std::min(lo,a.pos.entry);hi=std::max(hi,a.pos.entry);} }
-    if(!hb){lo=0;hi=1;}
-    if(fabs(hi-lo)<1e-9){ double pad=std::max(fabs(hi)*0.0005,1e-6); lo-=pad; hi+=pad; }
-    for(int i=0;i<=4;i++){ int yy=gy+gh*i/4; draw_line(gx,yy,gx+gw-1,yy,GRID); }
-    auto py=[&](double v){ double n=(v-lo)/(hi-lo); n=std::max(0.0,std::min(1.0,n)); return gy+gh-1-(int)lround(n*(gh-1)); };
-    if(a.pos.open&&a.pos.entry>0){ int ey=py(a.pos.entry); for(int X=gx;X<gx+gw;X+=10)draw_line(X,ey,X+4,ey,AMBER); text(gx+2,ey-16,"ENTRY",AMBER,2); }
-    if(a.history_count>=2){
-      auto px=[&](int i){ return gx+(i*(gw-1))/(a.history_count-1); };
-      uint16_t col=history_at(a,a.history_count-1)>=history_at(a,0)?GREEN:RED;
-      for(int i=1;i<a.history_count;i++)draw_line(px(i-1),py(history_at(a,i-1)),px(i),py(history_at(a,i)),col,2);
-      int lxp=px(a.history_count-1),lyp=py(history_at(a,a.history_count-1)); rect(lxp-3,lyp-3,6,6,WHITE);
-    } else text_center(gx,gw,gy+gh/2-8,"COLLECTING DATA",AMBER,2);
-    int yb=gy+gh+8; char t[80];
-    fmt_money(b,sizeof(b),lo); snprintf(t,sizeof(t),"LO %s",b); text(gx,yb,t,MUTED,2);
-    fmt_money(b,sizeof(b),hi); snprintf(t,sizeof(t),"HI %s",b); text_right(gx+gw,yb,t,MUTED,2);
-    history_window(b,sizeof(b),a); text(gx,yb+24,b,MUTED,2); text_right(gx+gw,yb+24,"TAP < >",MUTED,2);
+    double pct=chart_change_pct(a); snprintf(b,sizeof(b),"%+.2f%%",pct); text_right(340,top+14,b,pct>=0?GREEN:RED,2);
+    int gx=32,gy=top+50,gw=304; char t[80];
+    if(a.candle_count){
+      // Candles get most of the card; volume has a separate baseline underneath.
+      // At the 36-candle cap each body remains five pixels wide on this panel.
+      int price_h=174,volume_y=gy+price_h+8,volume_h=42;
+      double candle_lo=0,candle_hi=0,max_volume=0; candle_bounds(a,candle_lo,candle_hi,max_volume);
+      double lo=candle_lo,hi=candle_hi;
+      if(a.price>0&&std::isfinite(a.price)){lo=std::min(lo,a.price);hi=std::max(hi,a.price);}
+      if(a.pos.open&&a.pos.entry>0){lo=std::min(lo,a.pos.entry);hi=std::max(hi,a.pos.entry);}
+      double range=hi-lo;
+      if(range<1e-9){double pad=std::max(fabs(hi)*0.0005,1e-6);lo-=pad;hi+=pad;}
+      else {double pad=range*0.04;lo-=pad;hi+=pad;}
+      for(int i=0;i<=4;i++){int yy=gy+price_h*i/4;draw_line(gx,yy,gx+gw-1,yy,GRID);}
+      auto py=[&](double v){double n=(v-lo)/(hi-lo);n=std::max(0.0,std::min(1.0,n));return gy+price_h-1-(int)lround(n*(price_h-1));};
+      int entry_y=-1;
+      if(a.pos.open&&a.pos.entry>0){
+        entry_y=py(a.pos.entry);
+        for(int X=gx;X<gx+gw;X+=10)draw_line(X,entry_y,std::min(X+4,gx+gw-1),entry_y,AMBER);
+      }
+      draw_line(gx,volume_y+volume_h-1,gx+gw-1,volume_y+volume_h-1,GRID);
+      int slot=std::max(1,gw/(int)a.candle_count),body_w=std::max(3,std::min(9,slot-3));
+      if(!(body_w&1))body_w--;
+      for(int i=0;i<a.candle_count;i++){
+        const Candle&cd=a.candles[i]; int cx=gx+((2*i+1)*gw)/(2*a.candle_count);
+        uint16_t color=cd.close>=cd.open?GREEN:RED;
+        int yh=py(cd.high),yl=py(cd.low),yo=py(cd.open),yc=py(cd.close);
+        draw_line(cx,yh,cx,yl,color);
+        int body_top=std::min(yo,yc),body_h=std::max(2,abs(yc-yo)+1);
+        rect(cx-body_w/2,body_top,body_w,body_h,color);
+        if(max_volume>0&&cd.volume>0){
+          int vh=std::max(1,(int)lround((cd.volume/max_volume)*(volume_h-2)));
+          rect(cx-body_w/2,volume_y+volume_h-1-vh,body_w,vh,color);
+        }
+      }
+      if(entry_y>=0){int label_y=entry_y<gy+17?entry_y+2:entry_y-16;text(gx+2,label_y,"ENTRY",AMBER,2);}
+      // Live price is already printed in the header; the dotted blue line and
+      // white end marker make its level visible without another crowded label.
+      if(a.price>0&&std::isfinite(a.price)){
+        int cy=py(a.price); for(int X=gx;X<gx+gw;X+=12)draw_line(X,cy,std::min(X+5,gx+gw-1),cy,BLUE);
+        rect(gx+gw-5,cy-2,5,5,WHITE);
+      }
+      int yb=volume_y+volume_h+6;
+      fmt_money(b,sizeof(b),candle_lo);snprintf(t,sizeof(t),"LO %s",b);text(gx,yb,t,MUTED,2);
+      fmt_money(b,sizeof(b),candle_hi);snprintf(t,sizeof(t),"HI %s",b);text_right(gx+gw,yb,t,MUTED,2);
+      candle_window(b,sizeof(b),a);text(gx,yb+24,b,MUTED,2);
+    } else {
+      // Legacy/partial feeds retain the former close-only expanded line chart.
+      int gh=188; double lo=0,hi=0; bool hb=history_bounds(a,lo,hi);
+      if(a.pos.open&&a.pos.entry>0){if(!hb){lo=hi=a.pos.entry;hb=true;}else{lo=std::min(lo,a.pos.entry);hi=std::max(hi,a.pos.entry);}}
+      if(!hb){lo=0;hi=1;}
+      if(fabs(hi-lo)<1e-9){double pad=std::max(fabs(hi)*0.0005,1e-6);lo-=pad;hi+=pad;}
+      for(int i=0;i<=4;i++){int yy=gy+gh*i/4;draw_line(gx,yy,gx+gw-1,yy,GRID);}
+      auto py=[&](double v){double n=(v-lo)/(hi-lo);n=std::max(0.0,std::min(1.0,n));return gy+gh-1-(int)lround(n*(gh-1));};
+      if(a.pos.open&&a.pos.entry>0){int ey=py(a.pos.entry);for(int X=gx;X<gx+gw;X+=10)draw_line(X,ey,std::min(X+4,gx+gw-1),ey,AMBER);text(gx+2,ey-16,"ENTRY",AMBER,2);}
+      if(a.history_count>=2){
+        auto px=[&](int i){return gx+(i*(gw-1))/(a.history_count-1);};
+        uint16_t col=history_at(a,a.history_count-1)>=history_at(a,0)?GREEN:RED;
+        for(int i=1;i<a.history_count;i++)draw_line(px(i-1),py(history_at(a,i-1)),px(i),py(history_at(a,i)),col,2);
+        int lxp=px(a.history_count-1),lyp=py(history_at(a,a.history_count-1));rect(lxp-3,lyp-3,6,6,WHITE);
+      } else text_center(gx,gw,gy+gh/2-8,"COLLECTING DATA",AMBER,2);
+      int yb=gy+gh+8;
+      fmt_money(b,sizeof(b),lo);snprintf(t,sizeof(t),"LO %s",b);text(gx,yb,t,MUTED,2);
+      fmt_money(b,sizeof(b),hi);snprintf(t,sizeof(t),"HI %s",b);text_right(gx+gw,yb,t,MUTED,2);
+      history_window(b,sizeof(b),a);text(gx,yb+24,b,MUTED,2);text_right(gx+gw,yb+24,"TAP < >",MUTED,2);
+    }
   } else if(detail){
     // Portfolio summary now lives only on the POSITIONS page.
     rect(16,top,336,64,CARD);
@@ -333,7 +464,6 @@ static void touch_task(void*){
   }
 }
 static esp_err_t http_evt(esp_http_client_event_t *e){ auto*v=(std::vector<char>*)e->user_data; if(e->event_id==HTTP_EVENT_ON_DATA){ const char* p=static_cast<const char*>(e->data); v->insert(v->end(),p,p+e->data_len); } return ESP_OK; }
-static double num(cJSON*o,const char*k){ cJSON*x=cJSON_GetObjectItemCaseSensitive(o,k); return cJSON_IsNumber(x)?x->valuedouble:0; }
 static bool fetch(){
   if(!wifi_up){ feed_status=ST_NOWIFI; data_dirty=true; return false; } std::vector<char> body; std::string auth="Bearer "+std::string(FEED_TOKEN);
   esp_http_client_config_t cfg={}; cfg.url=FEED_URL; cfg.event_handler=http_evt; cfg.user_data=&body; cfg.timeout_ms=12000; cfg.crt_bundle_attach=esp_crt_bundle_attach;
@@ -342,11 +472,36 @@ static bool fetch(){
   if(err!=ESP_OK||code!=200){ feed_status=ST_HTTPERR; feed_http_code=code; data_dirty=true; return false; } body.push_back(0); cJSON*d=cJSON_Parse(body.data()); if(!d){feed_status=ST_JSONERR;data_dirty=true;ESP_LOGE(TAG,"feed JSON parse failed");return false;}
   cJSON*ro=cJSON_GetObjectItem(d,"read_only"); if(!cJSON_IsTrue(ro)){ feed_status=ST_UNSAFE; data_dirty=true; cJSON_Delete(d); return false; }
   if(state_mux)xSemaphoreTake(state_mux,portMAX_DELAY);
-  cJSON*prices=cJSON_GetObjectItem(d,"prices"),*price_history=cJSON_GetObjectItem(d,"price_history"),*positions=cJSON_GetObjectItem(d,"positions"),*portfolio=cJSON_GetObjectItem(d,"portfolio"); balance=num(portfolio,"balance"); total_pnl=num(portfolio,"unrealized_pnl"); realized_pnl_today=num(portfolio,"realized_pnl_today"); double refresh=num(d,"refresh_seconds"); if(refresh>=1&&refresh<=3600)feed_refresh_seconds=(uint32_t)refresh; double history_step=num(d,"price_history_seconds"); history_sample_seconds=history_step>=5&&history_step<=3600?(uint32_t)history_step:feed_refresh_seconds;
-  for(auto&a:assets){ bool loaded=load_price_history(a,price_history); double price=num(prices,a.name); if(price>0&&std::isfinite(price)){a.price=price;if(!loaded)push_price(a,price);} a.pos=Position{}; cJSON*p=cJSON_GetObjectItem(positions,a.name); if(cJSON_IsObject(p)){ a.pos.open=true; cJSON*s=cJSON_GetObjectItem(p,"side"); if(cJSON_IsString(s))a.pos.side=s->valuestring; a.pos.size=num(p,"contracts"); if(a.pos.size==0) a.pos.size=num(p,"size"); a.pos.entry=num(p,"entry"); a.pos.pnl=num(p,"pnl"); } }
+  cJSON*prices=cJSON_GetObjectItem(d,"prices"),*price_history=cJSON_GetObjectItem(d,"price_history"),
+       *candles=cJSON_GetObjectItem(d,"candles"),*positions=cJSON_GetObjectItem(d,"positions"),
+       *portfolio=cJSON_GetObjectItem(d,"portfolio");
+  balance=num(portfolio,"balance"); total_pnl=num(portfolio,"unrealized_pnl"); realized_pnl_today=num(portfolio,"realized_pnl_today");
+  double refresh=num(d,"refresh_seconds"); if(refresh>=1&&refresh<=3600)feed_refresh_seconds=(uint32_t)refresh;
+  double history_step=num(d,"price_history_seconds"); history_sample_seconds=history_step>=5&&history_step<=3600?(uint32_t)history_step:feed_refresh_seconds;
+  double candle_step=num(d,"candle_interval_seconds");
+  if(candle_step<=0)candle_step=num(d,"candles_interval_seconds"); // tolerate an early pluralized producer
+  candle_interval_seconds=candle_step>=1&&candle_step<=604800?(uint32_t)candle_step:0;
+  int candle_total=0;
+  for(auto&a:assets){
+    load_candles(a,candles); candle_total+=a.candle_count;
+    bool loaded=load_price_history(a,price_history); double price=num(prices,a.name);
+    if(price>0&&std::isfinite(price)){a.price=price;if(!loaded)push_price(a,price);}
+    a.pos=Position{}; cJSON*p=cJSON_GetObjectItem(positions,a.name);
+    if(cJSON_IsObject(p)){a.pos.open=true;cJSON*s=cJSON_GetObjectItem(p,"side");if(cJSON_IsString(s))a.pos.side=s->valuestring;a.pos.size=num(p,"contracts");if(a.pos.size==0)a.pos.size=num(p,"size");a.pos.entry=num(p,"entry");a.pos.pnl=num(p,"pnl");}
+  }
+  // Missing interval metadata does not suppress valid candles. Infer a display
+  // label from adjacent timestamps; absent candles still select the legacy chart.
+  if(!candle_interval_seconds){
+    uint64_t inferred=0;
+    for(auto&a:assets)for(int i=1;i<a.candle_count;i++){
+      int64_t delta=a.candles[i].timestamp-a.candles[i-1].timestamp;
+      if(delta>0&&delta<=604800&&(!inferred||(uint64_t)delta<inferred))inferred=delta;
+    }
+    candle_interval_seconds=(uint32_t)inferred;
+  }
   closed_today.clear(); cJSON*closed=cJSON_GetObjectItem(d,"closed_today"); cJSON*item=nullptr; cJSON_ArrayForEach(item,closed){ ClosedPosition p; cJSON*s=cJSON_GetObjectItem(item,"symbol"); if(cJSON_IsString(s))p.symbol=s->valuestring; s=cJSON_GetObjectItem(item,"side"); if(cJSON_IsString(s))p.side=s->valuestring; p.size=num(item,"contracts"); p.pnl=num(item,"pnl"); closed_today.push_back(p); }
   cJSON*rd=cJSON_GetObjectItem(d,"realized_date"); if(cJSON_IsString(rd))realized_date=rd->valuestring; int open_count=0; for(auto&a:assets)if(a.pos.open)open_count++;
-  ESP_LOGI(TAG,"parsed bal=%.2f open=%d upl=%.2f rpl_today=%.2f closed=%u date=%s",balance,open_count,total_pnl,realized_pnl_today,(unsigned)closed_today.size(),realized_date.c_str());
+  ESP_LOGI(TAG,"parsed bal=%.2f open=%d candles=%d interval=%lus upl=%.2f rpl_today=%.2f closed=%u date=%s",balance,open_count,candle_total,(unsigned long)candle_interval_seconds,total_pnl,realized_pnl_today,(unsigned)closed_today.size(),realized_date.c_str());
   last_ok_ms=esp_timer_get_time()/1000; feed_status=ST_UPDATED;
   if(state_mux)xSemaphoreGive(state_mux);
   cJSON_Delete(d); data_dirty=true; return true;
