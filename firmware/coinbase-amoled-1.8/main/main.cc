@@ -74,6 +74,7 @@ static volatile int feed_status=ST_STARTING, feed_http_code=0;
 static volatile bool data_dirty=true;
 static SemaphoreHandle_t state_mux=nullptr;
 static volatile int tap_x=-1, tap_y=-1;   // latched new-press from the touch task; -1 = none
+static bool screen_on=true;                // Power-button (AXP2101 PWRKEY) display toggle; no auto-timeout
 struct Position { bool open=false; std::string side="-"; double size=0,entry=0,pnl=0; };
 struct ClosedPosition { std::string symbol="-",side="-"; double size=0,pnl=0; };
 struct Asset { const char *name; double price=0; Position pos; double history[HISTORY_SAMPLES]={}; uint8_t history_count=0,history_head=0; explicit Asset(const char*n):name(n){} };
@@ -151,6 +152,35 @@ static void update_battery(){
   g_batt.present=(dir==1||dir==2)||(lvl>=1&&lvl<=100);
   g_batt.level=std::max(0,std::min(100,(int)lvl));
   ESP_LOGI(TAG,"batt s1=%02x s2=%02x lvl=%u dir=%d vbus=%d chg=%d done=%d present=%d",s1,s2,lvl,dir,(int)g_batt.vbus,(int)g_batt.charging,(int)g_batt.done,(int)g_batt.present);
+}
+static bool axp_write(uint8_t reg,uint8_t val){ if(!axp_read_dev)return false; uint8_t b[2]={reg,val}; return i2c_master_transmit(axp_read_dev,b,2,100)==ESP_OK; }
+// Arm the AXP2101 PWRKEY short-press interrupt. Only touches IRQ registers (INTEN2
+// 0x41 + INTSTS 0x48-0x4A) — the official V2 example does exactly this and the panel
+// stays lit; the writes that blank V2 are the power-rail registers (0x80-0x99), which
+// we never touch. Long-press (>4s) still hardware-powers-off via the AXP config.
+static void axp_pkey_setup(){
+  if(!i2c_bus)return;
+  if(!axp_read_dev){ i2c_device_config_t c={.dev_addr_length=I2C_ADDR_BIT_LEN_7,.device_address=0x34,.scl_speed_hz=400000}; if(i2c_master_bus_add_device(i2c_bus,&c,&axp_read_dev)!=ESP_OK){axp_read_dev=nullptr;return;} }
+  uint8_t reg=0x41,en=0; if(i2c_master_transmit_receive(axp_read_dev,&reg,1,&en,1,50)==ESP_OK) axp_write(0x41,en|0x08); // INTEN2 bit3 = PWRON short-press
+  axp_write(0x48,0xFF); axp_write(0x49,0xFF); axp_write(0x4A,0xFF);  // clear any latched IRQs
+  ESP_LOGI(TAG,"AXP power-key IRQ armed");
+}
+// Returns true once per physical short-press of the Power button (latched in INTSTS2
+// 0x49 bit3, cleared W1C so the next press is a fresh event).
+static bool axp_pkey_short(){
+  if(!axp_read_dev)return false;
+  uint8_t reg=0x49,s=0;
+  if(i2c_master_transmit_receive(axp_read_dev,&reg,1,&s,1,50)!=ESP_OK)return false;
+  if(s&0x08){ axp_write(0x49,0x08); return true; }
+  return false;
+}
+// Toggle the AMOLED display for battery saving (display off command, not sleep — wakes
+// instantly). Only ever called from a physical Power-button press; there is no auto-timeout.
+static void set_screen(bool on){
+  if(on==screen_on)return;
+  screen_on=on;
+  if(panel) esp_lcd_panel_disp_on_off(panel,on);
+  ESP_LOGI(TAG,"screen %s",on?"ON":"OFF");
 }
 // Battery/power indicator that replaces the old "COINBASE" corner label.
 static void draw_battery(int x,int y){
@@ -488,6 +518,7 @@ static void init_rest(){
   axp_dump("touch"); ESP_LOGI(TAG,"PHASE7: touch %s",touch?"ready":"absent"); vTaskDelay(pdMS_TO_TICKS(PHASE_DELAY_MS));
   gpio_config_t gb={.pin_bit_mask=1ULL<<GPIO_NUM_0,.mode=GPIO_MODE_INPUT,.pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,.intr_type=GPIO_INTR_DISABLE}; gpio_config(&gb);
   update_battery();   // seed the power indicator before the first UI frame
+  axp_pkey_setup();   // arm the Power-button (AXP PWRKEY) short-press for screen on/off
 }
 // Network fetch runs on its own task so the blocking HTTP round trip never stalls
 // touch sampling or rendering in the UI loop. It writes shared feed state under
@@ -517,7 +548,7 @@ extern "C" void app_main(){
   state_mux=xSemaphoreCreateMutex();
   xTaskCreate(fetch_task,"feed",12288,nullptr,4,nullptr);
   xTaskCreate(touch_task,"touch",3072,nullptr,6,nullptr);
-  uint64_t last_draw=0,button_at=0,last_batt=0;
+  uint64_t last_draw=0,button_at=0,last_batt=0,last_pkey=0;
   bool button_down=false,ota_hold_handled=false,shown_portal=false,shown_armed=false;
   // Tight UI loop: sample touch every ~20ms, redraw only when something changed
   // (new feed data, a tap, battery, or the periodic stale-check heartbeat). With
@@ -529,10 +560,12 @@ extern "C" void app_main(){
     bool portal=network.IsPortalActive(),armed=network.IsOtaArmed();
     if(portal!=shown_portal||armed!=shown_armed){shown_portal=portal;shown_armed=armed;need_draw=true;}
     if(data_dirty){data_dirty=false;need_draw=true;}
+    // Power button (physical, AXP2101 PWRKEY): short press toggles the screen on/off.
+    if(now-last_pkey>=100){ last_pkey=now; if(axp_pkey_short()){ set_screen(!screen_on); if(screen_on)need_draw=true; } }
     int tx=tap_x,ty=tap_y;
     if(tx>=0){
-      tap_x=-1; tap_y=-1;   // consume the latched press
-      if(!portal){
+      tap_x=-1; tap_y=-1;   // consume the latched press (ignored while the screen is off)
+      if(!portal&&screen_on){
         if(ty>=390){ if(selected_chart>=0)selected_chart=-1; else detail=!detail; need_draw=true; }
         else if(selected_chart>=0&&ty>=54&&ty<390){ selected_chart=(selected_chart+(tx<W/2?4:1))%5; need_draw=true; }
         else if(!detail&&ty>=54&&ty<390){ for(int k=0;k<px_row_n;k++) if(ty>=px_row_y[k]&&ty<px_row_y[k]+px_row_h[k]){ selected_chart=px_row_asset[k]; need_draw=true; break; } }
@@ -541,11 +574,11 @@ extern "C" void app_main(){
     bool bb=gpio_get_level(GPIO_NUM_0)==0;
     if(bb&&!button_down){button_at=now;ota_hold_handled=false;}
     if(bb&&!ota_hold_handled&&now-button_at>=10000){network.ArmOta();ota_hold_handled=true;need_draw=true;}
-    if(!bb&&button_down&&!ota_hold_handled&&!portal){ if(selected_chart>=0)selected_chart=-1; else detail=!detail; need_draw=true; }
+    if(!bb&&button_down&&!ota_hold_handled&&!portal&&screen_on){ if(selected_chart>=0)selected_chart=-1; else detail=!detail; need_draw=true; }
     button_down=bb;
     if(now-last_batt>=1000){update_battery();last_batt=now;need_draw=true;}
     if(now-last_draw>=1000)need_draw=true;   // heartbeat so STALE/OFFLINE can appear without new data
-    if(need_draw){draw_locked();last_draw=now;}
+    if(need_draw&&screen_on){draw_locked();last_draw=now;}   // never flush while the screen is off
     vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
