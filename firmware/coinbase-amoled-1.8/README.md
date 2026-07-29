@@ -23,7 +23,7 @@ The board port follows Waveshare's official V2 sources: CO5300 over the unchange
 - Polls the HTTPS `/coinbase-device/` route every 30 seconds with both bearer token and device ID authorization.
 - Prices: BTC, SOL, XLM, HYPE, ETH.
 - Loads recent closes for compact direction-colored sparklines on the prices screen.
-- Tap any asset row for an expanded 24-36 candle chart with green/red bodies and wicks, proportional volume bars, high/low and interval/window labels, a live-price marker, and an amber entry line when that asset has an open position. Tap the left/right half to move to the previous/next asset, then tap **PRICES** to return. If candle data is absent or invalid, the expanded page falls back to the prior close-only line chart.
+- Tap any asset row for an expanded 24-36 **volume-candle** chart: green/red bodies and wicks, with each candle body's width proportional to that candle's volume within the visible window. There is no separate volume histogram. The page also shows high/low and interval/window labels, a live-price marker, and an amber entry line when that asset has an open position. Tap the left/right half to move to the previous/next asset, then tap **PRICES** to return. If candle data is absent or invalid, the expanded page falls back to the prior close-only line chart.
 - Uses a 2x minimum font size, brighter secondary text, and reflowed position/chart metadata for readability on the 1.8-inch panel.
 - Portfolio balance, unrealized P/L, and Coinbase daily realized P/L for the current America/New_York day.
 - Touch **POSITIONS** for all open positions plus positions closed today; touch **REFRESH** for an immediate poll.

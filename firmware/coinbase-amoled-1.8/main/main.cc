@@ -303,9 +303,9 @@ static void draw(){
     double pct=chart_change_pct(a); snprintf(b,sizeof(b),"%+.2f%%",pct); text_right(340,top+14,b,pct>=0?GREEN:RED,2);
     int gx=32,gy=top+50,gw=304; char t[80];
     if(a.candle_count){
-      // Candles get most of the card; volume has a separate baseline underneath.
-      // At the 36-candle cap each body remains five pixels wide on this panel.
-      int price_h=174,volume_y=gy+price_h+8,volume_h=42;
+      // Volume candles: body width represents each candle's volume relative to
+      // the highest-volume candle in the visible window. No separate volume bars.
+      int price_h=224;
       double candle_lo=0,candle_hi=0,max_volume=0; candle_bounds(a,candle_lo,candle_hi,max_volume);
       double lo=candle_lo,hi=candle_hi;
       if(a.price>0&&std::isfinite(a.price)){lo=std::min(lo,a.price);hi=std::max(hi,a.price);}
@@ -320,20 +320,19 @@ static void draw(){
         entry_y=py(a.pos.entry);
         for(int X=gx;X<gx+gw;X+=10)draw_line(X,entry_y,std::min(X+4,gx+gw-1),entry_y,AMBER);
       }
-      draw_line(gx,volume_y+volume_h-1,gx+gw-1,volume_y+volume_h-1,GRID);
-      int slot=std::max(1,gw/(int)a.candle_count),body_w=std::max(3,std::min(9,slot-3));
-      if(!(body_w&1))body_w--;
+      int slot=std::max(1,gw/(int)a.candle_count);
+      int max_body_w=std::max(1,std::min(11,slot-1));
+      if(!(max_body_w&1))max_body_w--;
       for(int i=0;i<a.candle_count;i++){
         const Candle&cd=a.candles[i]; int cx=gx+((2*i+1)*gw)/(2*a.candle_count);
         uint16_t color=cd.close>=cd.open?GREEN:RED;
         int yh=py(cd.high),yl=py(cd.low),yo=py(cd.open),yc=py(cd.close);
         draw_line(cx,yh,cx,yl,color);
+        double volume_ratio=max_volume>0?std::max(0.0,std::min(1.0,cd.volume/max_volume)):0.0;
+        int body_w=1+(int)lround(volume_ratio*(max_body_w-1));
+        if(body_w>1&&!(body_w&1))body_w--;
         int body_top=std::min(yo,yc),body_h=std::max(2,abs(yc-yo)+1);
         rect(cx-body_w/2,body_top,body_w,body_h,color);
-        if(max_volume>0&&cd.volume>0){
-          int vh=std::max(1,(int)lround((cd.volume/max_volume)*(volume_h-2)));
-          rect(cx-body_w/2,volume_y+volume_h-1-vh,body_w,vh,color);
-        }
       }
       if(entry_y>=0){int label_y=entry_y<gy+17?entry_y+2:entry_y-16;text(gx+2,label_y,"ENTRY",AMBER,2);}
       // Live price is already printed in the header; the dotted blue line and
@@ -342,10 +341,10 @@ static void draw(){
         int cy=py(a.price); for(int X=gx;X<gx+gw;X+=12)draw_line(X,cy,std::min(X+5,gx+gw-1),cy,BLUE);
         rect(gx+gw-5,cy-2,5,5,WHITE);
       }
-      int yb=volume_y+volume_h+6;
+      int yb=gy+price_h+8;
       fmt_money(b,sizeof(b),candle_lo);snprintf(t,sizeof(t),"LO %s",b);text(gx,yb,t,MUTED,2);
       fmt_money(b,sizeof(b),candle_hi);snprintf(t,sizeof(t),"HI %s",b);text_right(gx+gw,yb,t,MUTED,2);
-      candle_window(b,sizeof(b),a);text(gx,yb+24,b,MUTED,2);
+      candle_window(b,sizeof(b),a);text(gx,yb+24,b,MUTED,2);text_right(gx+gw,yb+24,"WIDTH=VOL",MUTED,2);
     } else {
       // Legacy/partial feeds retain the former close-only expanded line chart.
       int gh=188; double lo=0,hi=0; bool hb=history_bounds(a,lo,hi);
