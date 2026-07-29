@@ -73,6 +73,7 @@ enum { ST_STARTING=0, ST_UPDATED, ST_NOWIFI, ST_HTTPERR, ST_JSONERR, ST_UNSAFE }
 static volatile int feed_status=ST_STARTING, feed_http_code=0;
 static volatile bool data_dirty=true;
 static SemaphoreHandle_t state_mux=nullptr;
+static volatile int tap_x=-1, tap_y=-1;   // latched new-press from the touch task; -1 = none
 struct Position { bool open=false; std::string side="-"; double size=0,entry=0,pnl=0; };
 struct ClosedPosition { std::string symbol="-",side="-"; double size=0,pnl=0; };
 struct Asset { const char *name; double price=0; Position pos; double history[HISTORY_SAMPLES]={}; uint8_t history_count=0,history_head=0; explicit Asset(const char*n):name(n){} };
@@ -283,17 +284,44 @@ static void draw(){
 }
 // draw() reads feed state owned by the network task, so serialize it with state_mux.
 static void draw_locked(){ if(state_mux)xSemaphoreTake(state_mux,portMAX_DELAY); draw(); if(state_mux)xSemaphoreGive(state_mux); }
-static bool read_touch(uint16_t& x,uint16_t& y){
-  if(!touch)return false;
+// Touch runs on its own task, polling the controller's touch registers directly
+// every 10ms (the pattern the shipping ClawBuddy board uses). Direct reads keep
+// working through the FocalTech/CST "reports only on event" behavior, and because
+// it's a separate task, sampling stays alive even while the UI task is mid
+// frame-flush — so taps are no longer dropped. A new press is latched into
+// tap_x/tap_y for the UI loop to consume. Both controllers use the FocalTech
+// register layout: reg 0x02 = [count][xh][xl][yh][yl].
+static void touch_task(void*){
+  if(!i2c_bus){ ESP_LOGE(TAG,"touch task: no i2c bus"); vTaskDelete(nullptr); return; }
 #if BOARD_IS_V1
-  // The V1 FT-family controller NACKs i2c reads while idle (monitor mode); only
-  // read when INT (GPIO 21, active low) reports a pending touch event.
-  if(gpio_get_level(GPIO_NUM_21))return false;
+  const uint8_t addr=0x38;   // FT5x06
+#else
+  const uint8_t addr=0x15;   // CST816S
 #endif
-  if(esp_lcd_touch_read_data(touch)!=ESP_OK)return false;
-  esp_lcd_touch_point_data_t point={}; uint8_t points=0;
-  if(esp_lcd_touch_get_data(touch,&point,&points,1)!=ESP_OK||points==0)return false;
-  x=point.x; y=point.y; return true;
+  i2c_device_config_t c={.dev_addr_length=I2C_ADDR_BIT_LEN_7,.device_address=addr,.scl_speed_hz=400000};
+  i2c_master_dev_handle_t dev=nullptr;
+  if(i2c_master_bus_add_device(i2c_bus,&c,&dev)!=ESP_OK){ ESP_LOGE(TAG,"touch task: i2c add 0x%02x failed",addr); vTaskDelete(nullptr); return; }
+  ESP_LOGI(TAG,"touch task polling 0x%02x",addr);
+  bool down=false;
+  while(true){
+    bool pressed=false; int x=0,y=0;
+#if BOARD_IS_V1
+    bool ready=gpio_get_level(GPIO_NUM_21)==0;   // FT NACKs while idle; INT low = awake
+#else
+    bool ready=true;                              // CST816S answers whenever polled
+#endif
+    if(ready){
+      uint8_t reg=0x02, buf[6]={0};
+      if(i2c_master_transmit_receive(dev,&reg,1,buf,6,20)==ESP_OK){
+        int num=buf[0]&0x0F;
+        if(num>0&&num<=5){ int rx=((buf[1]&0x0F)<<8)|buf[2], ry=((buf[3]&0x0F)<<8)|buf[4];
+          if(rx>=0&&rx<W&&ry>=0&&ry<H){ x=rx; y=ry; pressed=true; } }
+      }
+    }
+    if(pressed&&!down){ tap_x=x; tap_y=y; ESP_LOGI(TAG,"tap x=%d y=%d",x,y); }
+    down=pressed;
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
 }
 static esp_err_t http_evt(esp_http_client_event_t *e){ auto*v=(std::vector<char>*)e->user_data; if(e->event_id==HTTP_EVENT_ON_DATA){ const char* p=static_cast<const char*>(e->data); v->insert(v->end(),p,p+e->data_len); } return ESP_OK; }
 static double num(cJSON*o,const char*k){ cJSON*x=cJSON_GetObjectItemCaseSensitive(o,k); return cJSON_IsNumber(x)?x->valuedouble:0; }
@@ -488,8 +516,9 @@ extern "C" void app_main(){
   vTaskDelay(pdMS_TO_TICKS(3000)); axp_dump("wifi+3s"); ESP_LOGI(TAG,"PHASE10: wifi/portal up");
   state_mux=xSemaphoreCreateMutex();
   xTaskCreate(fetch_task,"feed",12288,nullptr,4,nullptr);
+  xTaskCreate(touch_task,"touch",3072,nullptr,6,nullptr);
   uint64_t last_draw=0,button_at=0,last_batt=0;
-  bool down=false,button_down=false,ota_hold_handled=false,shown_portal=false,shown_armed=false;
+  bool button_down=false,ota_hold_handled=false,shown_portal=false,shown_armed=false;
   // Tight UI loop: sample touch every ~20ms, redraw only when something changed
   // (new feed data, a tap, battery, or the periodic stale-check heartbeat). With
   // the network fetch on its own task, the only blocking work here is a ~25ms
@@ -500,14 +529,15 @@ extern "C" void app_main(){
     bool portal=network.IsPortalActive(),armed=network.IsOtaArmed();
     if(portal!=shown_portal||armed!=shown_armed){shown_portal=portal;shown_armed=armed;need_draw=true;}
     if(data_dirty){data_dirty=false;need_draw=true;}
-    uint16_t x=0,y=0; bool pressed=read_touch(x,y);
-    if(!portal&&pressed&&!down){
-      ESP_LOGI(TAG,"touch x=%u y=%u",x,y);
-      if(y>=390){ if(selected_chart>=0)selected_chart=-1; else detail=!detail; need_draw=true; }
-      else if(selected_chart>=0&&y>=54&&y<390){ selected_chart=(selected_chart+(x<W/2?4:1))%5; need_draw=true; }
-      else if(!detail&&y>=54&&y<390){ for(int k=0;k<px_row_n;k++) if(y>=px_row_y[k]&&y<px_row_y[k]+px_row_h[k]){ selected_chart=px_row_asset[k]; need_draw=true; break; } }
+    int tx=tap_x,ty=tap_y;
+    if(tx>=0){
+      tap_x=-1; tap_y=-1;   // consume the latched press
+      if(!portal){
+        if(ty>=390){ if(selected_chart>=0)selected_chart=-1; else detail=!detail; need_draw=true; }
+        else if(selected_chart>=0&&ty>=54&&ty<390){ selected_chart=(selected_chart+(tx<W/2?4:1))%5; need_draw=true; }
+        else if(!detail&&ty>=54&&ty<390){ for(int k=0;k<px_row_n;k++) if(ty>=px_row_y[k]&&ty<px_row_y[k]+px_row_h[k]){ selected_chart=px_row_asset[k]; need_draw=true; break; } }
+      }
     }
-    down=pressed;
     bool bb=gpio_get_level(GPIO_NUM_0)==0;
     if(bb&&!button_down){button_at=now;ota_hold_handled=false;}
     if(bb&&!ota_hold_handled&&now-button_at>=10000){network.ArmOta();ota_hold_handled=true;need_draw=true;}
