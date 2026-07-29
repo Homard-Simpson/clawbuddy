@@ -76,6 +76,12 @@ static Asset assets[]={Asset("BTC"),Asset("SOL"),Asset("XLM"),Asset("HYPE"),Asse
 static std::vector<ClosedPosition> closed_today;
 static double balance=0, total_pnl=0, realized_pnl_today=0;
 static std::string realized_date="---- -- --";
+// AXP2101 PMU battery/power state. Read-only over i2c (address 0x34); never write on
+// V2 — PMU writes blank the CO5300 panel. Register semantics match the proven
+// ClawBuddy Axp2101 driver: level=reg 0xA4, charge dir=reg 0x01[6:5], done=0x01[2:0]==4.
+struct Battery { bool present=false; int level=0; bool charging=false, done=false, vbus=false; };
+static Battery g_batt;
+static i2c_master_dev_handle_t axp_read_dev=nullptr;
 
 static uint16_t rgb(uint8_t r,uint8_t g,uint8_t b){ return __builtin_bswap16(((r&0xF8)<<8)|((g&0xFC)<<3)|(b>>3)); }
 static const uint16_t BLACK=rgb(5,8,15),CARD=rgb(18,24,38),GRID=rgb(45,57,78),MUTED=rgb(190,198,214),WHITE=rgb(245,247,250),GREEN=rgb(48,209,88),RED=rgb(255,69,58),BLUE=rgb(55,126,255),AMBER=rgb(255,180,0);
@@ -128,6 +134,34 @@ static void history_window(char*b,size_t n,const Asset&a){
   else snprintf(b,n,"%luS WINDOW",(unsigned long)seconds);
 }
 static void flush_frame(){ for(int y=0;y<H;y+=TX_LINES){ int rows=std::min(TX_LINES,H-y); memcpy(txbuf,fb+y*W,W*rows*sizeof(uint16_t)); ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel,0,y,W,y+rows,txbuf)); if(xSemaphoreTake(tx_done,pdMS_TO_TICKS(2000))!=pdTRUE){ESP_LOGE(TAG,"LCD transfer timeout y=%d",y);break;} } }
+static uint8_t axp_read(uint8_t reg){ if(!axp_read_dev)return 0xFF; uint8_t v=0; return i2c_master_transmit_receive(axp_read_dev,&reg,1,&v,1,100)==ESP_OK?v:0xFF; }
+static void update_battery(){
+  if(!i2c_bus)return;
+  if(!axp_read_dev){ i2c_device_config_t c={.dev_addr_length=I2C_ADDR_BIT_LEN_7,.device_address=0x34,.scl_speed_hz=400000}; if(i2c_master_bus_add_device(i2c_bus,&c,&axp_read_dev)!=ESP_OK){axp_read_dev=nullptr;return;} }
+  uint8_t s1=axp_read(0x00),s2=axp_read(0x01),lvl=axp_read(0xA4);
+  int dir=(s2&0b01100000)>>5;               // 0 standby, 1 charging, 2 discharging
+  g_batt.vbus=(s1&0x20)!=0;                  // STATUS1 bit5 = VBUS good
+  g_batt.charging=(dir==1);
+  g_batt.done=((s2&0b00000111)==0b00000100); // charge state = done
+  g_batt.present=(dir==1||dir==2)||(lvl>=1&&lvl<=100);
+  g_batt.level=std::max(0,std::min(100,(int)lvl));
+  ESP_LOGI(TAG,"batt s1=%02x s2=%02x lvl=%u dir=%d vbus=%d chg=%d done=%d present=%d",s1,s2,lvl,dir,(int)g_batt.vbus,(int)g_batt.charging,(int)g_batt.done,(int)g_batt.present);
+}
+// Battery/power indicator that replaces the old "COINBASE" corner label.
+static void draw_battery(int x,int y){
+  int bw=40,bh=20,pct=g_batt.level;
+  uint16_t lvlcol=!g_batt.present?MUTED:(pct>=50?GREEN:pct>=20?AMBER:RED);
+  uint16_t bord=g_batt.charging?BLUE:lvlcol;
+  rect(x,y,bw,bh,bord); rect(x+2,y+2,bw-4,bh-4,BLACK);   // hollow body
+  rect(x+bw,y+bh/2-4,4,8,bord);                          // terminal nub
+  if(g_batt.present){ int fw=(bw-6)*pct/100; if(fw<0)fw=0; if(fw>bw-6)fw=bw-6; rect(x+3,y+3,fw,bh-6,lvlcol); }
+  if(g_batt.charging){ int cx=x+bw/2; draw_line(cx+4,y+3,cx-3,y+bh/2,WHITE,2); draw_line(cx-3,y+bh/2,cx+3,y+bh/2,WHITE,2); draw_line(cx+3,y+bh/2,cx-4,y+bh-3,WHITE,2); }
+  char lb[16];
+  if(g_batt.present)snprintf(lb,sizeof(lb),"%d%%",pct);
+  else if(g_batt.vbus)snprintf(lb,sizeof(lb),"USB");
+  else snprintf(lb,sizeof(lb),"--");
+  text(x+bw+10,y+2,lb,g_batt.charging?BLUE:(g_batt.present?WHITE:MUTED),2);
+}
 static void draw(){
   rect(0,0,W,H,BLACK); char b[64];
   auto& network=NetworkPortal::GetInstance();
@@ -146,7 +180,7 @@ static void draw(){
     return;
   }
   uint64_t now=esp_timer_get_time()/1000; bool stale=!last_ok_ms||now-last_ok_ms>STALE_MS;
-  text(16,14,"COINBASE",WHITE,3);
+  draw_battery(16,12);
   bool feed_problem=status!="UPDATED"&&status!="STARTING";
   uint32_t interval=feed_refresh_seconds?feed_refresh_seconds:30;
   uint64_t since=g_last_fetch_ms?(now-g_last_fetch_ms)/1000:interval;
@@ -417,6 +451,7 @@ static void init_rest(){
 #endif
   axp_dump("touch"); ESP_LOGI(TAG,"PHASE7: touch %s",touch?"ready":"absent"); vTaskDelay(pdMS_TO_TICKS(PHASE_DELAY_MS));
   gpio_config_t gb={.pin_bit_mask=1ULL<<GPIO_NUM_0,.mode=GPIO_MODE_INPUT,.pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,.intr_type=GPIO_INTR_DISABLE}; gpio_config(&gb);
+  update_battery();   // seed the power indicator before the first UI frame
 }
 extern "C" void app_main(){
   ESP_LOGI(TAG,"board variant: %s",BOARD_IS_V1?"V1 (SH8601/FT5x06/AXP2101)":"V2 (CO5300/CST820)");
@@ -430,7 +465,7 @@ extern "C" void app_main(){
   auto& network=NetworkPortal::GetInstance();
   network.Initialize([](bool connected){wifi_up=connected;if(connected)force_fetch=true;},[](){});
   vTaskDelay(pdMS_TO_TICKS(3000)); axp_dump("wifi+3s"); ESP_LOGI(TAG,"PHASE10: wifi/portal up");
-  uint64_t last_fetch=0,last_draw=0,button_at=0;bool down=false,button_down=false,ota_hold_handled=false,shown_portal=false,shown_armed=false;
+  uint64_t last_fetch=0,last_draw=0,button_at=0,last_batt=0;bool down=false,button_down=false,ota_hold_handled=false,shown_portal=false,shown_armed=false;
   while(true){
     uint64_t now=esp_timer_get_time()/1000;
     bool portal=network.IsPortalActive(),armed=network.IsOtaArmed();
@@ -462,6 +497,7 @@ extern "C" void app_main(){
       draw();last_draw=now;
     }
     button_down=b;
+    if(now-last_batt>=1000){update_battery();last_batt=now;}   // refresh battery/power reading
     if(now-last_draw>=1000){draw();last_draw=now;}   // tick the refresh countdown once a second
     vTaskDelay(pdMS_TO_TICKS(50));
   }
