@@ -65,10 +65,14 @@ static bool wifi_up=false, detail=false, force_fetch=true;
 static int selected_chart=-1;
 static uint32_t feed_refresh_seconds=30,history_sample_seconds=30;
 static uint64_t last_ok_ms=0;
-static uint64_t g_last_fetch_ms=0, refreshed_flash_ms=0;
-static bool pending_manual=false;
 static int px_row_y[5],px_row_h[5],px_row_asset[5],px_row_n=0;
-static std::string status="STARTING";
+// Feed state is produced by a dedicated network task and consumed by the UI loop.
+// status is an int enum (atomic to read/write across tasks); the heavier shared
+// state (prices, positions, closed_today vector) is guarded by state_mux.
+enum { ST_STARTING=0, ST_UPDATED, ST_NOWIFI, ST_HTTPERR, ST_JSONERR, ST_UNSAFE };
+static volatile int feed_status=ST_STARTING, feed_http_code=0;
+static volatile bool data_dirty=true;
+static SemaphoreHandle_t state_mux=nullptr;
 struct Position { bool open=false; std::string side="-"; double size=0,entry=0,pnl=0; };
 struct ClosedPosition { std::string symbol="-",side="-"; double size=0,pnl=0; };
 struct Asset { const char *name; double price=0; Position pos; double history[HISTORY_SAMPLES]={}; uint8_t history_count=0,history_head=0; explicit Asset(const char*n):name(n){} };
@@ -181,7 +185,7 @@ static void draw(){
   }
   uint64_t now=esp_timer_get_time()/1000; bool stale=!last_ok_ms||now-last_ok_ms>STALE_MS;
   draw_battery(16,12);
-  bool feed_problem=status!="UPDATED"&&status!="STARTING";
+  bool feed_problem=feed_status!=ST_UPDATED&&feed_status!=ST_STARTING;
   const char*page=selected_chart>=0?assets[selected_chart].name:(detail?"POSITIONS":"PRICES");
   text_right(352,28,page,MUTED,2);
   // Prices stream live (~2s), so there is no refresh countdown to show. Only warn
@@ -189,7 +193,11 @@ static void draw(){
   if(stale||!wifi_up||feed_problem){
     if(stale)snprintf(b,sizeof(b),"STALE");
     else if(!wifi_up)snprintf(b,sizeof(b),"OFFLINE");
-    else snprintf(b,sizeof(b),"%s",status.c_str());
+    else if(feed_status==ST_HTTPERR)snprintf(b,sizeof(b),"HTTP %d",feed_http_code);
+    else if(feed_status==ST_JSONERR)snprintf(b,sizeof(b),"JSON ERR");
+    else if(feed_status==ST_UNSAFE)snprintf(b,sizeof(b),"UNSAFE");
+    else if(feed_status==ST_NOWIFI)snprintf(b,sizeof(b),"NO WIFI");
+    else snprintf(b,sizeof(b),"FEED ERR");
     text_right(352,8,b,AMBER,2);
   }
   int top=58;
@@ -269,9 +277,12 @@ static void draw(){
       y+=rh+2;
     }
   }
-  button(16,400,158,selected_chart>=0||detail?"PRICES":"POSITIONS",BLUE); button(194,400,158,"REFRESH",CARD);
+  // Single full-width view toggle. No refresh button — prices are live.
+  { const char*bl=selected_chart>=0||detail?"PRICES":"POSITIONS"; rect(16,400,336,36,BLUE); text_center(16,336,410,bl,WHITE,2); }
   flush_frame();
 }
+// draw() reads feed state owned by the network task, so serialize it with state_mux.
+static void draw_locked(){ if(state_mux)xSemaphoreTake(state_mux,portMAX_DELAY); draw(); if(state_mux)xSemaphoreGive(state_mux); }
 static bool read_touch(uint16_t& x,uint16_t& y){
   if(!touch)return false;
 #if BOARD_IS_V1
@@ -287,18 +298,21 @@ static bool read_touch(uint16_t& x,uint16_t& y){
 static esp_err_t http_evt(esp_http_client_event_t *e){ auto*v=(std::vector<char>*)e->user_data; if(e->event_id==HTTP_EVENT_ON_DATA){ const char* p=static_cast<const char*>(e->data); v->insert(v->end(),p,p+e->data_len); } return ESP_OK; }
 static double num(cJSON*o,const char*k){ cJSON*x=cJSON_GetObjectItemCaseSensitive(o,k); return cJSON_IsNumber(x)?x->valuedouble:0; }
 static bool fetch(){
-  if(!wifi_up){ status="NO WIFI"; return false; } std::vector<char> body; std::string auth="Bearer "+std::string(FEED_TOKEN);
+  if(!wifi_up){ feed_status=ST_NOWIFI; data_dirty=true; return false; } std::vector<char> body; std::string auth="Bearer "+std::string(FEED_TOKEN);
   esp_http_client_config_t cfg={}; cfg.url=FEED_URL; cfg.event_handler=http_evt; cfg.user_data=&body; cfg.timeout_ms=12000; cfg.crt_bundle_attach=esp_crt_bundle_attach;
   auto h=esp_http_client_init(&cfg); esp_http_client_set_header(h,"Authorization",auth.c_str()); esp_http_client_set_header(h,"X-Device-ID",DEVICE_ID); esp_err_t err=esp_http_client_perform(h); int code=esp_http_client_get_status_code(h); esp_http_client_cleanup(h);
   ESP_LOGI(TAG,"feed http=%d err=%s bytes=%u",code,esp_err_to_name(err),(unsigned)body.size());
-  if(err!=ESP_OK||code!=200){ status="HTTP "+std::to_string(code); return false; } body.push_back(0); cJSON*d=cJSON_Parse(body.data()); if(!d){status="JSON ERROR";ESP_LOGE(TAG,"feed JSON parse failed");return false;}
-  cJSON*ro=cJSON_GetObjectItem(d,"read_only"); if(!cJSON_IsTrue(ro)){ status="UNSAFE FEED"; cJSON_Delete(d); return false; }
+  if(err!=ESP_OK||code!=200){ feed_status=ST_HTTPERR; feed_http_code=code; data_dirty=true; return false; } body.push_back(0); cJSON*d=cJSON_Parse(body.data()); if(!d){feed_status=ST_JSONERR;data_dirty=true;ESP_LOGE(TAG,"feed JSON parse failed");return false;}
+  cJSON*ro=cJSON_GetObjectItem(d,"read_only"); if(!cJSON_IsTrue(ro)){ feed_status=ST_UNSAFE; data_dirty=true; cJSON_Delete(d); return false; }
+  if(state_mux)xSemaphoreTake(state_mux,portMAX_DELAY);
   cJSON*prices=cJSON_GetObjectItem(d,"prices"),*price_history=cJSON_GetObjectItem(d,"price_history"),*positions=cJSON_GetObjectItem(d,"positions"),*portfolio=cJSON_GetObjectItem(d,"portfolio"); balance=num(portfolio,"balance"); total_pnl=num(portfolio,"unrealized_pnl"); realized_pnl_today=num(portfolio,"realized_pnl_today"); double refresh=num(d,"refresh_seconds"); if(refresh>=1&&refresh<=3600)feed_refresh_seconds=(uint32_t)refresh; double history_step=num(d,"price_history_seconds"); history_sample_seconds=history_step>=5&&history_step<=3600?(uint32_t)history_step:feed_refresh_seconds;
   for(auto&a:assets){ bool loaded=load_price_history(a,price_history); double price=num(prices,a.name); if(price>0&&std::isfinite(price)){a.price=price;if(!loaded)push_price(a,price);} a.pos=Position{}; cJSON*p=cJSON_GetObjectItem(positions,a.name); if(cJSON_IsObject(p)){ a.pos.open=true; cJSON*s=cJSON_GetObjectItem(p,"side"); if(cJSON_IsString(s))a.pos.side=s->valuestring; a.pos.size=num(p,"contracts"); if(a.pos.size==0) a.pos.size=num(p,"size"); a.pos.entry=num(p,"entry"); a.pos.pnl=num(p,"pnl"); } }
   closed_today.clear(); cJSON*closed=cJSON_GetObjectItem(d,"closed_today"); cJSON*item=nullptr; cJSON_ArrayForEach(item,closed){ ClosedPosition p; cJSON*s=cJSON_GetObjectItem(item,"symbol"); if(cJSON_IsString(s))p.symbol=s->valuestring; s=cJSON_GetObjectItem(item,"side"); if(cJSON_IsString(s))p.side=s->valuestring; p.size=num(item,"contracts"); p.pnl=num(item,"pnl"); closed_today.push_back(p); }
   cJSON*rd=cJSON_GetObjectItem(d,"realized_date"); if(cJSON_IsString(rd))realized_date=rd->valuestring; int open_count=0; for(auto&a:assets)if(a.pos.open)open_count++;
   ESP_LOGI(TAG,"parsed bal=%.2f open=%d upl=%.2f rpl_today=%.2f closed=%u date=%s",balance,open_count,total_pnl,realized_pnl_today,(unsigned)closed_today.size(),realized_date.c_str());
-  cJSON_Delete(d); last_ok_ms=esp_timer_get_time()/1000; status="UPDATED"; return true;
+  last_ok_ms=esp_timer_get_time()/1000; feed_status=ST_UPDATED;
+  if(state_mux)xSemaphoreGive(state_mux);
+  cJSON_Delete(d); data_dirty=true; return true;
 }
 static bool color_done(esp_lcd_panel_io_handle_t,esp_lcd_panel_io_event_data_t*,void*){ BaseType_t wake=pdFALSE; xSemaphoreGiveFromISR(tx_done,&wake); return wake==pdTRUE; }
 static i2c_master_bus_handle_t ensure_i2c_bus(){
@@ -447,6 +461,19 @@ static void init_rest(){
   gpio_config_t gb={.pin_bit_mask=1ULL<<GPIO_NUM_0,.mode=GPIO_MODE_INPUT,.pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,.intr_type=GPIO_INTR_DISABLE}; gpio_config(&gb);
   update_battery();   // seed the power indicator before the first UI frame
 }
+// Network fetch runs on its own task so the blocking HTTP round trip never stalls
+// touch sampling or rendering in the UI loop. It writes shared feed state under
+// state_mux (see fetch()) and raises data_dirty for the UI loop to redraw.
+static void fetch_task(void*){
+  uint64_t last=0;
+  while(true){
+    uint64_t now=esp_timer_get_time()/1000;
+    bool portal=NetworkPortal::GetInstance().IsPortalActive();
+    uint32_t interval_ms=feed_refresh_seconds?feed_refresh_seconds*1000u:REFRESH_MS;
+    if(!portal&&(force_fetch||last==0||now-last>=interval_ms)){ force_fetch=false; last=now; fetch(); }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+}
 extern "C" void app_main(){
   ESP_LOGI(TAG,"board variant: %s",BOARD_IS_V1?"V1 (SH8601/FT5x06/AXP2101)":"V2 (CO5300/CST820)");
   phase1_display_bars();
@@ -459,40 +486,36 @@ extern "C" void app_main(){
   auto& network=NetworkPortal::GetInstance();
   network.Initialize([](bool connected){wifi_up=connected;if(connected)force_fetch=true;},[](){});
   vTaskDelay(pdMS_TO_TICKS(3000)); axp_dump("wifi+3s"); ESP_LOGI(TAG,"PHASE10: wifi/portal up");
-  uint64_t last_fetch=0,last_draw=0,button_at=0,last_batt=0;bool down=false,button_down=false,ota_hold_handled=false,shown_portal=false,shown_armed=false;
+  state_mux=xSemaphoreCreateMutex();
+  xTaskCreate(fetch_task,"feed",12288,nullptr,4,nullptr);
+  uint64_t last_draw=0,button_at=0,last_batt=0;
+  bool down=false,button_down=false,ota_hold_handled=false,shown_portal=false,shown_armed=false;
+  // Tight UI loop: sample touch every ~20ms, redraw only when something changed
+  // (new feed data, a tap, battery, or the periodic stale-check heartbeat). With
+  // the network fetch on its own task, the only blocking work here is a ~25ms
+  // frame flush — shorter than a human tap, so presses are no longer dropped.
   while(true){
     uint64_t now=esp_timer_get_time()/1000;
+    bool need_draw=false;
     bool portal=network.IsPortalActive(),armed=network.IsOtaArmed();
-    if(portal!=shown_portal||armed!=shown_armed){shown_portal=portal;shown_armed=armed;draw();last_draw=now;}
-    uint32_t interval_ms=feed_refresh_seconds?feed_refresh_seconds*1000u:REFRESH_MS;
-    if(!portal&&(force_fetch||now-last_fetch>=interval_ms)){ bool manual=pending_manual; pending_manual=false; force_fetch=false; last_fetch=now; g_last_fetch_ms=now; bool ok=fetch(); if(manual&&ok)refreshed_flash_ms=now; draw();last_draw=now; }
-    bool pressed=false; uint16_t x=0,y=0; pressed=read_touch(x,y);
+    if(portal!=shown_portal||armed!=shown_armed){shown_portal=portal;shown_armed=armed;need_draw=true;}
+    if(data_dirty){data_dirty=false;need_draw=true;}
+    uint16_t x=0,y=0; bool pressed=read_touch(x,y);
     if(!portal&&pressed&&!down){
       ESP_LOGI(TAG,"touch x=%u y=%u",x,y);
-      if(y>=390){
-        if(x<184){ if(selected_chart>=0)selected_chart=-1; else detail=!detail; }
-        else { force_fetch=true; pending_manual=true; }
-        draw();last_draw=now;
-      } else if(selected_chart>=0&&y>=54&&y<392){
-        selected_chart=(selected_chart+(x<W/2?4:1))%5;
-        draw();last_draw=now;
-      } else if(!detail&&y>=54&&y<392){
-        for(int k=0;k<px_row_n;k++){ if(y>=px_row_y[k]&&y<px_row_y[k]+px_row_h[k]){ selected_chart=px_row_asset[k]; draw(); last_draw=now; break; } }
-      }
+      if(y>=390){ if(selected_chart>=0)selected_chart=-1; else detail=!detail; need_draw=true; }
+      else if(selected_chart>=0&&y>=54&&y<390){ selected_chart=(selected_chart+(x<W/2?4:1))%5; need_draw=true; }
+      else if(!detail&&y>=54&&y<390){ for(int k=0;k<px_row_n;k++) if(y>=px_row_y[k]&&y<px_row_y[k]+px_row_h[k]){ selected_chart=px_row_asset[k]; need_draw=true; break; } }
     }
     down=pressed;
-    bool b=gpio_get_level(GPIO_NUM_0)==0;
-    if(b&&!button_down){button_at=now;ota_hold_handled=false;}
-    if(b&&!ota_hold_handled&&now-button_at>=10000){network.ArmOta();ota_hold_handled=true;draw();last_draw=now;}
-    if(!b&&button_down&&!ota_hold_handled&&!portal){
-      if(now-button_at>=800){force_fetch=true;pending_manual=true;}
-      else if(selected_chart>=0)selected_chart=-1;
-      else detail=!detail;
-      draw();last_draw=now;
-    }
-    button_down=b;
-    if(now-last_batt>=1000){update_battery();last_batt=now;}   // refresh battery/power reading
-    if(now-last_draw>=1000){draw();last_draw=now;}   // tick the refresh countdown once a second
-    vTaskDelay(pdMS_TO_TICKS(50));
+    bool bb=gpio_get_level(GPIO_NUM_0)==0;
+    if(bb&&!button_down){button_at=now;ota_hold_handled=false;}
+    if(bb&&!ota_hold_handled&&now-button_at>=10000){network.ArmOta();ota_hold_handled=true;need_draw=true;}
+    if(!bb&&button_down&&!ota_hold_handled&&!portal){ if(selected_chart>=0)selected_chart=-1; else detail=!detail; need_draw=true; }
+    button_down=bb;
+    if(now-last_batt>=1000){update_battery();last_batt=now;need_draw=true;}
+    if(now-last_draw>=1000)need_draw=true;   // heartbeat so STALE/OFFLINE can appear without new data
+    if(need_draw){draw_locked();last_draw=now;}
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
