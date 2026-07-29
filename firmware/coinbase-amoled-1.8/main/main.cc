@@ -65,6 +65,9 @@ static bool wifi_up=false, detail=false, force_fetch=true;
 static int selected_chart=-1;
 static uint32_t feed_refresh_seconds=30,history_sample_seconds=30;
 static uint64_t last_ok_ms=0;
+static uint64_t g_last_fetch_ms=0, refreshed_flash_ms=0;
+static bool pending_manual=false;
+static int px_row_y[5],px_row_h[5],px_row_asset[5],px_row_n=0;
 static std::string status="STARTING";
 struct Position { bool open=false; std::string side="-"; double size=0,entry=0,pnl=0; };
 struct ClosedPosition { std::string symbol="-",side="-"; double size=0,pnl=0; };
@@ -81,6 +84,8 @@ static int text_width(const char*s,int scale=2){ scale=std::max(2,scale); return
 static void text(int x,int y,const char*s,uint16_t c,int scale=2){ scale=std::max(2,scale); for(;*s;s++,x+=6*scale){ unsigned ch=(unsigned char)*s; if(ch<32||ch>127) ch='?'; for(int i=0;i<5;i++){ uint8_t col=font[ch*5+i]; for(int j=0;j<8;j++) if(col&(1<<j)) rect(x+i*scale,y+j*scale,scale,scale,c); } } }
 static void text_right(int right,int y,const char*s,uint16_t c,int scale=2){ text(std::max(0,right-text_width(s,scale)),y,s,c,scale); }
 static void text_center(int left,int width,int y,const char*s,uint16_t c,int scale=2){ text(left+std::max(0,(width-text_width(s,scale))/2),y,s,c,scale); }
+static void text_bold(int x,int y,const char*s,uint16_t c,int scale=2){ text(x,y,s,c,scale); text(x+1,y,s,c,scale); }
+static void to_upper(char*s){ for(;*s;s++) if(*s>='a'&&*s<='z') *s=(char)(*s-'a'+'A'); }
 static void fmt_money(char *b,size_t n,double v){ double a=fabs(v); if(a>=10000) snprintf(b,n,"$%.0f",v); else if(a>=100) snprintf(b,n,"$%.2f",v); else if(a>=1) snprintf(b,n,"$%.3f",v); else snprintf(b,n,"$%.5f",v); }
 static void button(int x,int y,int w,const char *label,uint16_t c){ rect(x,y,w,36,c); text(x+10,y+10,label,WHITE,2); }
 static void pixel(int x,int y,uint16_t c){ if(x>=0&&x<W&&y>=0&&y<H)fb[y*W+x]=c; }
@@ -143,50 +148,98 @@ static void draw(){
   uint64_t now=esp_timer_get_time()/1000; bool stale=!last_ok_ms||now-last_ok_ms>STALE_MS;
   text(16,14,"COINBASE",WHITE,3);
   bool feed_problem=status!="UPDATED"&&status!="STARTING";
+  uint32_t interval=feed_refresh_seconds?feed_refresh_seconds:30;
+  uint64_t since=g_last_fetch_ms?(now-g_last_fetch_ms)/1000:interval;
+  int secs_left=(int)interval-(int)since; if(secs_left<0)secs_left=0; if(secs_left>(int)interval)secs_left=(int)interval;
+  bool flash=refreshed_flash_ms&&now-refreshed_flash_ms<1500;
   if(stale)snprintf(b,sizeof(b),"STALE");
   else if(!wifi_up)snprintf(b,sizeof(b),"OFFLINE");
   else if(feed_problem)snprintf(b,sizeof(b),"%s",status.c_str());
-  else snprintf(b,sizeof(b),"LIVE %luS",(unsigned long)feed_refresh_seconds);
-  text_right(352,18,b,stale||feed_problem?AMBER:GREEN,2);
-  rect(16,48,336,68,CARD);
-  text(28,56,"PORTFOLIO",MUTED,2);
-  fmt_money(b,sizeof(b),balance); text(28,80,b,WHITE,3);
-  snprintf(b,sizeof(b),"UPL %+.2f",total_pnl); text_right(340,56,b,total_pnl>=0?GREEN:RED,2);
-  snprintf(b,sizeof(b),"RPL %+.2f",realized_pnl_today); text_right(340,88,b,realized_pnl_today>=0?GREEN:RED,2);
+  else if(flash)snprintf(b,sizeof(b),"REFRESHED");
+  else snprintf(b,sizeof(b),"LIVE %02dS",secs_left);
+  text_right(352,8,b,stale||feed_problem?AMBER:(flash?WHITE:GREEN),2);
+  const char*page=selected_chart>=0?assets[selected_chart].name:(detail?"POSITIONS":"PRICES");
+  text_right(352,28,page,MUTED,2);
+  // Refresh countdown bar: full right after a refresh, depletes toward the next one.
+  rect(16,48,336,4,GRID);
+  int fillw=(int)((long)336*secs_left/(interval?interval:1)); if(fillw<0)fillw=0; if(fillw>336)fillw=336;
+  rect(16,48,fillw,4,stale||feed_problem?AMBER:GREEN);
+  int top=58;
   if(selected_chart>=0){
-    auto&a=assets[selected_chart]; rect(16,124,336,260,CARD); text(28,134,a.name,WHITE,3); fmt_money(b,sizeof(b),a.price); text(112,138,b,WHITE,2);
-    double pct=history_change_pct(a); snprintf(b,sizeof(b),"%+.2f%%",pct); text_right(340,138,b,pct>=0?GREEN:RED,2);
-    text(28,164,"LIVE PRICE TREND",MUTED,2);
-    sparkline(a,28,188,312,130,true);
-    if(a.history_count<2)text_center(28,312,244,"COLLECTING",AMBER,2);
-    double lo=0,hi=0; if(history_bounds(a,lo,hi)){ fmt_money(b,sizeof(b),lo); text(28,326,b,MUTED,2); fmt_money(b,sizeof(b),hi); text_right(340,326,b,MUTED,2); }
-    history_window(b,sizeof(b),a); text(28,352,b,MUTED,2); text_right(340,352,"TAP < >",MUTED,2);
-  } else if(!detail){
-    int y=124; for(auto &a:assets){
-      rect(16,y,336,50,CARD);
-      text(24,y+4,a.name,WHITE,2); fmt_money(b,sizeof(b),a.price); text(80,y+4,b,WHITE,2); sparkline(a,208,y+4,134,24);
-      if(a.pos.open){ snprintf(b,sizeof(b),"%c U%+.2f",a.pos.side.empty()?'-':a.pos.side[0],a.pos.pnl); text(24,y+29,b,a.pos.pnl>=0?GREEN:RED,2); }
-      else text(24,y+29,"FLAT",MUTED,2);
-      double pct=history_change_pct(a); if(a.history_count>=2){snprintf(b,sizeof(b),"%+.2f%%",pct);text_right(340,y+29,b,pct>=0?GREEN:RED,2);}
-      y+=52;
+    auto&a=assets[selected_chart];
+    rect(16,top,336,338,CARD);
+    text_bold(28,top+8,a.name,WHITE,3);
+    fmt_money(b,sizeof(b),a.price); text(28+(int)strlen(a.name)*18+12,top+14,b,AMBER,2);
+    double pct=history_change_pct(a); snprintf(b,sizeof(b),"%+.2f%%",pct); text_right(340,top+14,b,pct>=0?GREEN:RED,2);
+    int gx=32,gy=top+50,gw=304,gh=188;
+    double lo=0,hi=0; bool hb=history_bounds(a,lo,hi);
+    if(a.pos.open&&a.pos.entry>0){ if(!hb){lo=hi=a.pos.entry;hb=true;} else {lo=std::min(lo,a.pos.entry);hi=std::max(hi,a.pos.entry);} }
+    if(!hb){lo=0;hi=1;}
+    if(fabs(hi-lo)<1e-9){ double pad=std::max(fabs(hi)*0.0005,1e-6); lo-=pad; hi+=pad; }
+    for(int i=0;i<=4;i++){ int yy=gy+gh*i/4; draw_line(gx,yy,gx+gw-1,yy,GRID); }
+    auto py=[&](double v){ double n=(v-lo)/(hi-lo); n=std::max(0.0,std::min(1.0,n)); return gy+gh-1-(int)lround(n*(gh-1)); };
+    if(a.pos.open&&a.pos.entry>0){ int ey=py(a.pos.entry); for(int X=gx;X<gx+gw;X+=10)draw_line(X,ey,X+4,ey,AMBER); text(gx+2,ey-16,"ENTRY",AMBER,2); }
+    if(a.history_count>=2){
+      auto px=[&](int i){ return gx+(i*(gw-1))/(a.history_count-1); };
+      uint16_t col=history_at(a,a.history_count-1)>=history_at(a,0)?GREEN:RED;
+      for(int i=1;i<a.history_count;i++)draw_line(px(i-1),py(history_at(a,i-1)),px(i),py(history_at(a,i)),col,2);
+      int lxp=px(a.history_count-1),lyp=py(history_at(a,a.history_count-1)); rect(lxp-3,lyp-3,6,6,WHITE);
+    } else text_center(gx,gw,gy+gh/2-8,"COLLECTING DATA",AMBER,2);
+    int yb=gy+gh+8; char t[80];
+    fmt_money(b,sizeof(b),lo); snprintf(t,sizeof(t),"LO %s",b); text(gx,yb,t,MUTED,2);
+    fmt_money(b,sizeof(b),hi); snprintf(t,sizeof(t),"HI %s",b); text_right(gx+gw,yb,t,MUTED,2);
+    history_window(b,sizeof(b),a); text(gx,yb+24,b,MUTED,2); text_right(gx+gw,yb+24,"TAP < >",MUTED,2);
+  } else if(detail){
+    // Portfolio summary now lives only on the POSITIONS page.
+    rect(16,top,336,64,CARD);
+    text(28,top+8,"PORTFOLIO",MUTED,2);
+    fmt_money(b,sizeof(b),balance); text(28,top+32,b,WHITE,3);
+    snprintf(b,sizeof(b),"UPL %+.2f",total_pnl); text_right(340,top+8,b,total_pnl>=0?GREEN:RED,2);
+    snprintf(b,sizeof(b),"RPL %+.2f",realized_pnl_today); text_right(340,top+40,b,realized_pnl_today>=0?GREEN:RED,2);
+    int y=top+72;
+    int open_total=0; for(auto&a:assets)if(a.pos.open)open_total++;
+    snprintf(b,sizeof(b),"OPEN POSITIONS %d",open_total); text(16,y,b,WHITE,2); y+=24;
+    if(!open_total){ text(24,y,"NONE",MUTED,2); y+=28; }
+    int shown=0;
+    for(auto&a:assets){ if(!a.pos.open)continue; if(y+56>392)break;
+      uint16_t sc=(a.pos.side.size()&&(a.pos.side[0]=='S'||a.pos.side[0]=='s'))?RED:GREEN;
+      rect(16,y,336,56,CARD); rect(16,y,6,56,sc);
+      char sd[12]; snprintf(sd,sizeof(sd),"%s",a.pos.side.c_str()); to_upper(sd);
+      char nm[28]; snprintf(nm,sizeof(nm),"%s %s",a.name,sd); text(28,y+6,nm,WHITE,2);
+      fmt_money(b,sizeof(b),a.price); text_right(350,y+4,b,AMBER,3);            // current price, on top
+      char entry[24]; fmt_money(entry,sizeof(entry),a.pos.entry); snprintf(b,sizeof(b),"%.4g @ %s",a.pos.size,entry); text(28,y+34,b,MUTED,2); // size @ purchase price
+      snprintf(b,sizeof(b),"U%+.2f",a.pos.pnl); text_right(350,y+34,b,a.pos.pnl>=0?GREEN:RED,2);
+      y+=60; shown++;
+    }
+    if(open_total>shown){ snprintf(b,sizeof(b),"+%d MORE",open_total-shown); text(24,y,b,AMBER,2); y+=24; }
+    if(y+40<392){
+      snprintf(b,sizeof(b),"CLOSED TODAY %u",(unsigned)closed_today.size()); text(16,y,b,WHITE,2); y+=24;
+      if(closed_today.empty())text(24,y,"NONE YET",MUTED,2);
+      else{ int cs=0; for(auto&p:closed_today){ if(cs>=2||y+38>392)break; rect(16,y,336,36,CARD); char sd[12]; snprintf(sd,sizeof(sd),"%s",p.side.c_str()); to_upper(sd); snprintf(b,sizeof(b),"%s %s",p.symbol.c_str(),sd); text(24,y+4,b,WHITE,2); snprintf(b,sizeof(b),"R%+.2f",p.pnl); text_right(350,y+4,b,p.pnl>=0?GREEN:RED,2); snprintf(b,sizeof(b),"SIZE %.4g",p.size); text(24,y+20,b,MUTED,2); y+=40; cs++; } }
     }
   } else {
-    int open_total=0; for(auto&a:assets)if(a.pos.open)open_total++;
-    snprintf(b,sizeof(b),"OPEN POSITIONS %d",open_total); text(16,124,b,WHITE,2);
-    int y=148,shown=0;
-    for(auto&a:assets)if(a.pos.open&&shown<2){
-      rect(16,y,336,42,CARD);
-      snprintf(b,sizeof(b),"%s %s",a.name,a.pos.side.c_str()); text(24,y+4,b,WHITE,2);
-      snprintf(b,sizeof(b),"U%+.2f",a.pos.pnl); text_right(340,y+4,b,a.pos.pnl>=0?GREEN:RED,2);
-      char entry[24]; fmt_money(entry,sizeof(entry),a.pos.entry); snprintf(b,sizeof(b),"%.4g @ %s",a.pos.size,entry); text(24,y+23,b,MUTED,2);
-      y+=44;shown++;
+    // PRICES page: open positions get taller/bolder rows with an amber live price.
+    int y=top; px_row_n=0;
+    for(int i=0;i<5;i++){ auto&a=assets[i]; bool open=a.pos.open; int rh=open?64:50;
+      px_row_y[px_row_n]=y; px_row_h[px_row_n]=rh; px_row_asset[px_row_n]=i; px_row_n++;
+      rect(16,y,336,rh,CARD);
+      if(open){
+        uint16_t sc=(a.pos.side.size()&&(a.pos.side[0]=='S'||a.pos.side[0]=='s'))?RED:GREEN;
+        rect(16,y,6,rh,sc);
+        text_bold(30,y+6,a.name,WHITE,3);
+        fmt_money(b,sizeof(b),a.price); text_right(350,y+8,b,AMBER,3);          // live price, distinct color
+        char sd[12]; snprintf(sd,sizeof(sd),"%s",a.pos.side.c_str()); to_upper(sd); text(30,y+40,sd,sc,2);
+        snprintf(b,sizeof(b),"U%+.2f",a.pos.pnl); text_right(350,y+40,b,a.pos.pnl>=0?GREEN:RED,2);
+        sparkline(a,150,y+42,120,16,false);
+      } else {
+        text(24,y+6,a.name,WHITE,2);
+        fmt_money(b,sizeof(b),a.price); text(96,y+6,b,MUTED,2);
+        sparkline(a,210,y+4,140,18,false);
+        text(24,y+28,"FLAT",MUTED,2);
+        double pct=history_change_pct(a); if(a.history_count>=2){snprintf(b,sizeof(b),"%+.2f%%",pct);text_right(350,y+28,b,pct>=0?GREEN:RED,2);}
+      }
+      y+=rh+2;
     }
-    if(!open_total)text(24,150,"NONE",MUTED,2);
-    else if(open_total>shown){snprintf(b,sizeof(b),"+%d MORE",open_total-shown);text(24,238,b,AMBER,2);}
-    snprintf(b,sizeof(b),"CLOSED TODAY %u",(unsigned)closed_today.size()); text(16,258,b,WHITE,2);
-    y=282;shown=0;
-    for(auto&p:closed_today){ if(shown>=2)break; rect(16,y,336,48,CARD); snprintf(b,sizeof(b),"%s %s",p.symbol.c_str(),p.side.c_str()); text(24,y+4,b,WHITE,2); snprintf(b,sizeof(b),"R%+.2f",p.pnl); text_right(340,y+4,b,p.pnl>=0?GREEN:RED,2); snprintf(b,sizeof(b),"SIZE %.4g",p.size); text(24,y+27,b,MUTED,2); y+=50; shown++; }
-    if(!shown)text(24,284,"NONE YET",MUTED,2);
   }
   button(16,400,158,selected_chart>=0||detail?"PRICES":"POSITIONS",BLUE); button(194,400,158,"REFRESH",CARD);
   flush_frame();
@@ -323,8 +376,16 @@ static void init_rest(){
   ESP_LOGI(TAG,"PHASE4: PSRAM fb allocated"); vTaskDelay(pdMS_TO_TICKS(PHASE_DELAY_MS));
   splash_bars(); ESP_LOGI(TAG,"PHASE5: bars redrawn via app path"); vTaskDelay(pdMS_TO_TICKS(BOARD_IS_V1?PHASE_DELAY_MS:3000));
 #if BOARD_IS_V1
-  { uint8_t bl=(uint8_t)((255*75)/100); ESP_ERROR_CHECK(esp_lcd_panel_io_tx_param(lcd_io,(0x02UL<<24)|(0x51UL<<8),&bl,1)); }
-#else
+  // Bisect probe: render the real UI straight after the proven splash, and log
+  // PSRAM readback so a silent framebuffer failure can't hide behind clean logs.
+  draw();
+  ESP_LOGI(TAG,"PHASE5b: UI drawn right after splash; fb0=0x%04x mid=0x%04x",fb[0],fb[W*H/2]);
+  vTaskDelay(pdMS_TO_TICKS(1500));
+#endif
+#if !BOARD_IS_V1
+  // V1 sets 75% via the 0x51 entry in its init table; a separate raw 0x51 write is
+  // the only panel transaction between the visible splash and the first UI frame,
+  // so it stays removed while bisecting the blank-UI failure.
   ESP_ERROR_CHECK(esp_lcd_panel_co5300_set_brightness(panel,75));
 #endif
   ESP_LOGI(TAG,"PHASE6: brightness 75 applied"); vTaskDelay(pdMS_TO_TICKS(PHASE_DELAY_MS));
@@ -374,20 +435,20 @@ extern "C" void app_main(){
     uint64_t now=esp_timer_get_time()/1000;
     bool portal=network.IsPortalActive(),armed=network.IsOtaArmed();
     if(portal!=shown_portal||armed!=shown_armed){shown_portal=portal;shown_armed=armed;draw();last_draw=now;}
-    if(!portal&&(force_fetch||now-last_fetch>=REFRESH_MS)){force_fetch=false;last_fetch=now;fetch();draw();last_draw=now;}
+    uint32_t interval_ms=feed_refresh_seconds?feed_refresh_seconds*1000u:REFRESH_MS;
+    if(!portal&&(force_fetch||now-last_fetch>=interval_ms)){ bool manual=pending_manual; pending_manual=false; force_fetch=false; last_fetch=now; g_last_fetch_ms=now; bool ok=fetch(); if(manual&&ok)refreshed_flash_ms=now; draw();last_draw=now; }
     bool pressed=false; uint16_t x=0,y=0; pressed=read_touch(x,y);
     if(!portal&&pressed&&!down){
       ESP_LOGI(TAG,"touch x=%u y=%u",x,y);
       if(y>=390){
         if(x<184){ if(selected_chart>=0)selected_chart=-1; else detail=!detail; }
-        else force_fetch=true;
+        else { force_fetch=true; pending_manual=true; }
         draw();last_draw=now;
-      } else if(selected_chart>=0&&y>=124&&y<385){
+      } else if(selected_chart>=0&&y>=54&&y<392){
         selected_chart=(selected_chart+(x<W/2?4:1))%5;
         draw();last_draw=now;
-      } else if(!detail&&y>=124&&y<382){
-        int row=(y-124)/52;
-        if(row>=0&&row<5&&(y-124)%52<50){selected_chart=row;draw();last_draw=now;}
+      } else if(!detail&&y>=54&&y<392){
+        for(int k=0;k<px_row_n;k++){ if(y>=px_row_y[k]&&y<px_row_y[k]+px_row_h[k]){ selected_chart=px_row_asset[k]; draw(); last_draw=now; break; } }
       }
     }
     down=pressed;
@@ -395,13 +456,13 @@ extern "C" void app_main(){
     if(b&&!button_down){button_at=now;ota_hold_handled=false;}
     if(b&&!ota_hold_handled&&now-button_at>=10000){network.ArmOta();ota_hold_handled=true;draw();last_draw=now;}
     if(!b&&button_down&&!ota_hold_handled&&!portal){
-      if(now-button_at>=800)force_fetch=true;
+      if(now-button_at>=800){force_fetch=true;pending_manual=true;}
       else if(selected_chart>=0)selected_chart=-1;
       else detail=!detail;
       draw();last_draw=now;
     }
     button_down=b;
-    if(now-last_draw>30000){draw();last_draw=now;}
+    if(now-last_draw>=1000){draw();last_draw=now;}   // tick the refresh countdown once a second
     vTaskDelay(pdMS_TO_TICKS(50));
   }
 }
