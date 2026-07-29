@@ -53,7 +53,7 @@ static constexpr int PANEL_X_GAP=0x10;
 static constexpr int PHASE_DELAY_MS=BOARD_IS_V1?100:2000;
 static constexpr int BARS_HOLD_MS=BOARD_IS_V1?1500:5000;
 static constexpr int HISTORY_SAMPLES=60;
-static constexpr uint32_t REFRESH_MS=30000, STALE_MS=75000;
+static constexpr uint32_t REFRESH_MS=30000, STALE_MS=20000;
 static esp_lcd_panel_handle_t panel;
 static esp_lcd_panel_io_handle_t lcd_io;
 static esp_lcd_touch_handle_t touch;
@@ -182,22 +182,16 @@ static void draw(){
   uint64_t now=esp_timer_get_time()/1000; bool stale=!last_ok_ms||now-last_ok_ms>STALE_MS;
   draw_battery(16,12);
   bool feed_problem=status!="UPDATED"&&status!="STARTING";
-  uint32_t interval=feed_refresh_seconds?feed_refresh_seconds:30;
-  uint64_t since=g_last_fetch_ms?(now-g_last_fetch_ms)/1000:interval;
-  int secs_left=(int)interval-(int)since; if(secs_left<0)secs_left=0; if(secs_left>(int)interval)secs_left=(int)interval;
-  bool flash=refreshed_flash_ms&&now-refreshed_flash_ms<1500;
-  if(stale)snprintf(b,sizeof(b),"STALE");
-  else if(!wifi_up)snprintf(b,sizeof(b),"OFFLINE");
-  else if(feed_problem)snprintf(b,sizeof(b),"%s",status.c_str());
-  else if(flash)snprintf(b,sizeof(b),"REFRESHED");
-  else snprintf(b,sizeof(b),"LIVE %02dS",secs_left);
-  text_right(352,8,b,stale||feed_problem?AMBER:(flash?WHITE:GREEN),2);
   const char*page=selected_chart>=0?assets[selected_chart].name:(detail?"POSITIONS":"PRICES");
   text_right(352,28,page,MUTED,2);
-  // Refresh countdown bar: full right after a refresh, depletes toward the next one.
-  rect(16,48,336,4,GRID);
-  int fillw=(int)((long)336*secs_left/(interval?interval:1)); if(fillw<0)fillw=0; if(fillw>336)fillw=336;
-  rect(16,48,fillw,4,stale||feed_problem?AMBER:GREEN);
+  // Prices stream live (~2s), so there is no refresh countdown to show. Only warn
+  // in the corner when the feed actually goes stale or offline.
+  if(stale||!wifi_up||feed_problem){
+    if(stale)snprintf(b,sizeof(b),"STALE");
+    else if(!wifi_up)snprintf(b,sizeof(b),"OFFLINE");
+    else snprintf(b,sizeof(b),"%s",status.c_str());
+    text_right(352,8,b,AMBER,2);
+  }
   int top=58;
   if(selected_chart>=0){
     auto&a=assets[selected_chart];
@@ -299,7 +293,7 @@ static bool fetch(){
   ESP_LOGI(TAG,"feed http=%d err=%s bytes=%u",code,esp_err_to_name(err),(unsigned)body.size());
   if(err!=ESP_OK||code!=200){ status="HTTP "+std::to_string(code); return false; } body.push_back(0); cJSON*d=cJSON_Parse(body.data()); if(!d){status="JSON ERROR";ESP_LOGE(TAG,"feed JSON parse failed");return false;}
   cJSON*ro=cJSON_GetObjectItem(d,"read_only"); if(!cJSON_IsTrue(ro)){ status="UNSAFE FEED"; cJSON_Delete(d); return false; }
-  cJSON*prices=cJSON_GetObjectItem(d,"prices"),*price_history=cJSON_GetObjectItem(d,"price_history"),*positions=cJSON_GetObjectItem(d,"positions"),*portfolio=cJSON_GetObjectItem(d,"portfolio"); balance=num(portfolio,"balance"); total_pnl=num(portfolio,"unrealized_pnl"); realized_pnl_today=num(portfolio,"realized_pnl_today"); double refresh=num(d,"refresh_seconds"); if(refresh>=5&&refresh<=3600)feed_refresh_seconds=(uint32_t)refresh; double history_step=num(d,"price_history_seconds"); history_sample_seconds=history_step>=5&&history_step<=3600?(uint32_t)history_step:feed_refresh_seconds;
+  cJSON*prices=cJSON_GetObjectItem(d,"prices"),*price_history=cJSON_GetObjectItem(d,"price_history"),*positions=cJSON_GetObjectItem(d,"positions"),*portfolio=cJSON_GetObjectItem(d,"portfolio"); balance=num(portfolio,"balance"); total_pnl=num(portfolio,"unrealized_pnl"); realized_pnl_today=num(portfolio,"realized_pnl_today"); double refresh=num(d,"refresh_seconds"); if(refresh>=1&&refresh<=3600)feed_refresh_seconds=(uint32_t)refresh; double history_step=num(d,"price_history_seconds"); history_sample_seconds=history_step>=5&&history_step<=3600?(uint32_t)history_step:feed_refresh_seconds;
   for(auto&a:assets){ bool loaded=load_price_history(a,price_history); double price=num(prices,a.name); if(price>0&&std::isfinite(price)){a.price=price;if(!loaded)push_price(a,price);} a.pos=Position{}; cJSON*p=cJSON_GetObjectItem(positions,a.name); if(cJSON_IsObject(p)){ a.pos.open=true; cJSON*s=cJSON_GetObjectItem(p,"side"); if(cJSON_IsString(s))a.pos.side=s->valuestring; a.pos.size=num(p,"contracts"); if(a.pos.size==0) a.pos.size=num(p,"size"); a.pos.entry=num(p,"entry"); a.pos.pnl=num(p,"pnl"); } }
   closed_today.clear(); cJSON*closed=cJSON_GetObjectItem(d,"closed_today"); cJSON*item=nullptr; cJSON_ArrayForEach(item,closed){ ClosedPosition p; cJSON*s=cJSON_GetObjectItem(item,"symbol"); if(cJSON_IsString(s))p.symbol=s->valuestring; s=cJSON_GetObjectItem(item,"side"); if(cJSON_IsString(s))p.side=s->valuestring; p.size=num(item,"contracts"); p.pnl=num(item,"pnl"); closed_today.push_back(p); }
   cJSON*rd=cJSON_GetObjectItem(d,"realized_date"); if(cJSON_IsString(rd))realized_date=rd->valuestring; int open_count=0; for(auto&a:assets)if(a.pos.open)open_count++;
