@@ -20,14 +20,14 @@ The board port follows Waveshare's official V2 sources: CO5300 over the unchange
 
 ## Behavior
 
-- Polls the HTTPS `/coinbase-device/` route every 30 seconds with both bearer token and device ID authorization.
+- Polls the authenticated HTTPS `/coinbase-device/` route on the feed-provided cadence (currently ~2 seconds for prices and 30 seconds for account/position data) with both bearer token and device ID authorization.
 - Prices: BTC, SOL, XLM, HYPE, ETH.
 - Loads recent closes for compact direction-colored sparklines on the prices screen.
 - Tap any asset row for an expanded 24-36 **volume-candle** chart: green/red bodies and wicks, with each candle body's width proportional to that candle's volume within the visible window. There is no separate volume histogram. The page also shows high/low and interval/window labels, a live-price marker, and an amber entry line when that asset has an open position. Tap the left/right half to move to the previous/next asset, then tap **PRICES** to return. If candle data is absent or invalid, the expanded page falls back to the prior close-only line chart.
 - Uses a 2x minimum font size, brighter secondary text, and reflowed position/chart metadata for readability on the 1.8-inch panel.
 - Portfolio balance, unrealized P/L, and Coinbase daily realized P/L for the current America/New_York day.
-- Touch **POSITIONS** for all open positions plus positions closed today; touch **REFRESH** for an immediate poll.
-- Shows LIVE, OFFLINE, HTTP/JSON errors, and STALE after 75 seconds without a successful update.
+- Touch **POSITIONS** for all open positions plus every reconstructed closing order for the current America/New_York day; rows use the live average entry with cents and show an overflow count when the screen cannot fit them all.
+- Shows OFFLINE, HTTP/JSON errors, STALE when the price feed stops, and ACCT STALE when fresh prices are masking an outdated position snapshot.
 - Refuses feed data unless `read_only` is true. No order endpoints or write code exist.
 - Reuses up to 10 Wi-Fi credentials stored by ClawBuddy in the `wifi` NVS namespace.
 - If no credentials exist, starts the open `ClawBuddy-Coinbase-XXXX` setup AP immediately. If saved networks cannot connect, the same captive portal starts after 45 seconds while station retries continue.

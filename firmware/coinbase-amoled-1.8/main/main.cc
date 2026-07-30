@@ -71,7 +71,7 @@ static int px_row_y[5],px_row_h[5],px_row_asset[5],px_row_n=0;
 // Feed state is produced by a dedicated network task and consumed by the UI loop.
 // status is an int enum (atomic to read/write across tasks); the heavier shared
 // state (prices, positions, closed_today vector) is guarded by state_mux.
-enum { ST_STARTING=0, ST_UPDATED, ST_NOWIFI, ST_HTTPERR, ST_JSONERR, ST_UNSAFE };
+enum { ST_STARTING=0, ST_UPDATED, ST_NOWIFI, ST_HTTPERR, ST_JSONERR, ST_UNSAFE, ST_ACCOUNT_STALE };
 static volatile int feed_status=ST_STARTING, feed_http_code=0;
 static volatile bool data_dirty=true;
 static SemaphoreHandle_t state_mux=nullptr;
@@ -107,6 +107,7 @@ static void text_center(int left,int width,int y,const char*s,uint16_t c,int sca
 static void text_bold(int x,int y,const char*s,uint16_t c,int scale=2){ text(x,y,s,c,scale); text(x+1,y,s,c,scale); }
 static void to_upper(char*s){ for(;*s;s++) if(*s>='a'&&*s<='z') *s=(char)(*s-'a'+'A'); }
 static void fmt_money(char *b,size_t n,double v){ double a=fabs(v); if(a>=10000) snprintf(b,n,"$%.0f",v); else if(a>=100) snprintf(b,n,"$%.2f",v); else if(a>=1) snprintf(b,n,"$%.3f",v); else snprintf(b,n,"$%.5f",v); }
+static void fmt_entry_money(char *b,size_t n,double v){ double a=fabs(v); if(a>=100) snprintf(b,n,"$%.2f",v); else if(a>=1) snprintf(b,n,"$%.3f",v); else snprintf(b,n,"$%.5f",v); }
 static void button(int x,int y,int w,const char *label,uint16_t c){ rect(x,y,w,36,c); text(x+10,y+10,label,WHITE,2); }
 static void pixel(int x,int y,uint16_t c){ if(x>=0&&x<W&&y>=0&&y<H)fb[y*W+x]=c; }
 static void draw_line(int x0,int y0,int x1,int y1,uint16_t c,int thickness=1){
@@ -290,6 +291,7 @@ static void draw(){
     else if(feed_status==ST_HTTPERR)snprintf(b,sizeof(b),"HTTP %d",feed_http_code);
     else if(feed_status==ST_JSONERR)snprintf(b,sizeof(b),"JSON ERR");
     else if(feed_status==ST_UNSAFE)snprintf(b,sizeof(b),"UNSAFE");
+    else if(feed_status==ST_ACCOUNT_STALE)snprintf(b,sizeof(b),"ACCT STALE");
     else if(feed_status==ST_NOWIFI)snprintf(b,sizeof(b),"NO WIFI");
     else snprintf(b,sizeof(b),"FEED ERR");
     text_right(352,8,b,AMBER,2);
@@ -383,7 +385,7 @@ static void draw(){
       char sd[12]; snprintf(sd,sizeof(sd),"%s",a.pos.side.c_str()); to_upper(sd);
       char nm[28]; snprintf(nm,sizeof(nm),"%s %s",a.name,sd); text(28,y+6,nm,WHITE,2);
       fmt_money(b,sizeof(b),a.price); text_right(350,y+4,b,AMBER,3);            // current price, on top
-      char entry[24]; fmt_money(entry,sizeof(entry),a.pos.entry); snprintf(b,sizeof(b),"%.4g @ %s",a.pos.size,entry); text(28,y+34,b,MUTED,2); // size @ purchase price
+      char entry[24]; fmt_entry_money(entry,sizeof(entry),a.pos.entry); snprintf(b,sizeof(b),"%.4g @ %s",a.pos.size,entry); text(28,y+34,b,MUTED,2); // size @ live average entry, always precise enough to see changes
       snprintf(b,sizeof(b),"U%+.2f",a.pos.pnl); text_right(350,y+34,b,a.pos.pnl>=0?GREEN:RED,2);
       y+=60; shown++;
     }
@@ -391,7 +393,7 @@ static void draw(){
     if(y+40<392){
       snprintf(b,sizeof(b),"CLOSED TODAY %u",(unsigned)closed_today.size()); text(16,y,b,WHITE,2); y+=24;
       if(closed_today.empty())text(24,y,"NONE YET",MUTED,2);
-      else{ int cs=0; for(auto&p:closed_today){ if(cs>=2||y+38>392)break; rect(16,y,336,36,CARD); char sd[12]; snprintf(sd,sizeof(sd),"%s",p.side.c_str()); to_upper(sd); snprintf(b,sizeof(b),"%s %s",p.symbol.c_str(),sd); text(24,y+4,b,WHITE,2); snprintf(b,sizeof(b),"R%+.2f",p.pnl); text_right(350,y+4,b,p.pnl>=0?GREEN:RED,2); snprintf(b,sizeof(b),"SIZE %.4g",p.size); text(24,y+20,b,MUTED,2); y+=40; cs++; } }
+      else{ int cs=0; for(auto&p:closed_today){ if(y+38>392)break; rect(16,y,336,36,CARD); char sd[12]; snprintf(sd,sizeof(sd),"%s",p.side.c_str()); to_upper(sd); snprintf(b,sizeof(b),"%s %s",p.symbol.c_str(),sd); text(24,y+4,b,WHITE,2); snprintf(b,sizeof(b),"R%+.2f",p.pnl); text_right(350,y+4,b,p.pnl>=0?GREEN:RED,2); snprintf(b,sizeof(b),"SIZE %.4g",p.size); text(24,y+20,b,MUTED,2); y+=40; cs++; } if((int)closed_today.size()>cs&&y+16<=392){snprintf(b,sizeof(b),"+%u MORE",(unsigned)closed_today.size()-cs);text(24,y,b,AMBER,2);} }
     }
   } else {
     // PRICES page: open positions get taller/bolder rows with an amber live price.
@@ -500,8 +502,10 @@ static bool fetch(){
   }
   closed_today.clear(); cJSON*closed=cJSON_GetObjectItem(d,"closed_today"); cJSON*item=nullptr; cJSON_ArrayForEach(item,closed){ ClosedPosition p; cJSON*s=cJSON_GetObjectItem(item,"symbol"); if(cJSON_IsString(s))p.symbol=s->valuestring; s=cJSON_GetObjectItem(item,"side"); if(cJSON_IsString(s))p.side=s->valuestring; p.size=num(item,"contracts"); p.pnl=num(item,"pnl"); closed_today.push_back(p); }
   cJSON*rd=cJSON_GetObjectItem(d,"realized_date"); if(cJSON_IsString(rd))realized_date=rd->valuestring; int open_count=0; for(auto&a:assets)if(a.pos.open)open_count++;
-  ESP_LOGI(TAG,"parsed bal=%.2f open=%d candles=%d interval=%lus upl=%.2f rpl_today=%.2f closed=%u date=%s",balance,open_count,candle_total,(unsigned long)candle_interval_seconds,total_pnl,realized_pnl_today,(unsigned)closed_today.size(),realized_date.c_str());
-  last_ok_ms=esp_timer_get_time()/1000; feed_status=ST_UPDATED;
+  bool account_stale=cJSON_IsTrue(cJSON_GetObjectItem(d,"positions_stale"));
+  double btc_entry=assets[0].pos.open?assets[0].pos.entry:0;
+  ESP_LOGI(TAG,"parsed bal=%.2f open=%d btc_entry=%.2f candles=%d interval=%lus upl=%.2f rpl_today=%.2f closed=%u date=%s",balance,open_count,btc_entry,candle_total,(unsigned long)candle_interval_seconds,total_pnl,realized_pnl_today,(unsigned)closed_today.size(),realized_date.c_str());
+  last_ok_ms=esp_timer_get_time()/1000; feed_status=account_stale?ST_ACCOUNT_STALE:ST_UPDATED;
   if(state_mux)xSemaphoreGive(state_mux);
   cJSON_Delete(d); data_dirty=true; return true;
 }
