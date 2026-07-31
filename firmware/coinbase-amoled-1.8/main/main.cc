@@ -76,7 +76,8 @@ static volatile int feed_status=ST_STARTING, feed_http_code=0;
 static volatile bool data_dirty=true;
 static SemaphoreHandle_t state_mux=nullptr;
 static volatile int tap_x=-1, tap_y=-1;   // latched new-press from the touch task; -1 = none
-static bool screen_on=true;                // BOOT long-press display toggle; no auto-timeout
+static bool screen_on=true;                // AXP2101 POWER short-press display toggle; no auto-timeout
+static bool privacy_mode=false;            // Deliberately visible after every boot; no persistence
 struct Position { bool open=false; std::string side="-"; double size=0,entry=0,pnl=0; };
 struct ClosedPosition { std::string symbol="-",side="-"; double size=0,pnl=0; };
 struct Candle { int64_t timestamp=0; double open=0,high=0,low=0,close=0,volume=0; };
@@ -90,8 +91,9 @@ static Asset assets[]={Asset("BTC"),Asset("SOL"),Asset("XLM"),Asset("HYPE"),Asse
 static std::vector<ClosedPosition> closed_today;
 static double balance=0, total_pnl=0, realized_pnl_today=0;
 static std::string realized_date="---- -- --";
-// AXP2101 PMU battery/power state. Read-only over i2c (address 0x34); never write on
-// V2 — PMU writes blank the CO5300 panel. Register semantics match the proven
+// AXP2101 PMU battery/power state. V2 writes are restricted to the proven PWRKEY
+// IRQ enable/status registers below; never write its rail registers (0x80-0x99),
+// which blank the CO5300 panel. Battery register semantics match the proven
 // ClawBuddy Axp2101 driver: level=reg 0xA4, charge dir=reg 0x01[6:5], done=0x01[2:0]==4.
 struct Battery { bool present=false; int level=0; bool charging=false, done=false, vbus=false; };
 static Battery g_batt;
@@ -195,17 +197,22 @@ static bool candle_bounds(const Asset&a,double&lo,double&hi,double&max_volume){
   for(int i=0;i<a.candle_count;i++){ lo=std::min(lo,a.candles[i].low); hi=std::max(hi,a.candles[i].high); max_volume=std::max(max_volume,a.candles[i].volume); }
   return true;
 }
-static void compact_duration(char*b,size_t n,uint64_t seconds){
-  if(seconds>=86400&&seconds%86400==0)snprintf(b,n,"%lluD",(unsigned long long)(seconds/86400));
-  else if(seconds>=3600&&seconds%3600==0)snprintf(b,n,"%lluH",(unsigned long long)(seconds/3600));
-  else if(seconds>=60&&seconds%60==0)snprintf(b,n,"%lluM",(unsigned long long)(seconds/60));
-  else snprintf(b,n,"%lluS",(unsigned long long)seconds);
-}
-static void candle_window(char*b,size_t n,const Asset&a){
-  if(!candle_interval_seconds){snprintf(b,n,"%u CANDLES",(unsigned)a.candle_count);return;}
-  char interval[16],window[16]; compact_duration(interval,sizeof(interval),candle_interval_seconds);
-  compact_duration(window,sizeof(window),(uint64_t)candle_interval_seconds*a.candle_count);
-  snprintf(b,n,"%s x %u / %s WINDOW",interval,(unsigned)a.candle_count,window);
+// Charts scale to market data (candles/history + live price) by default; the
+// entry price no longer forces its way into the range, because a distant entry
+// used to flatten the visible candles into a line. The ENTRY marker is drawn
+// only when the entry already sits inside the natural range, or is "near" it:
+// within ENTRY_NEAR_FRAC (25%) of the natural range height beyond either edge.
+// In the near case the range is expanded just enough to include the entry plus
+// a small ENTRY_EDGE_PAD_FRAC (2%) pad so the line isn't glued to the border.
+static constexpr double ENTRY_NEAR_FRAC=0.25;
+static constexpr double ENTRY_EDGE_PAD_FRAC=0.02;
+static bool entry_in_view(double entry,double&lo,double&hi){
+  if(!(entry>0)||!std::isfinite(entry))return false;
+  double range=hi-lo; if(!(range>0))return false;
+  if(entry>=lo&&entry<=hi)return true;
+  if(entry>hi&&entry-hi<=range*ENTRY_NEAR_FRAC){hi=entry+range*ENTRY_EDGE_PAD_FRAC;return true;}
+  if(entry<lo&&lo-entry<=range*ENTRY_NEAR_FRAC){lo=entry-range*ENTRY_EDGE_PAD_FRAC;return true;}
+  return false;
 }
 static void sparkline(const Asset&a,int x,int y,int w,int h,bool full=false){
   if(full){ for(int i=1;i<4;i++)draw_line(x,y+(h*i)/4,x+w-1,y+(h*i)/4,GRID); }
@@ -238,8 +245,32 @@ static void update_battery(){
   g_batt.level=std::max(0,std::min(100,(int)lvl));
   ESP_LOGI(TAG,"batt s1=%02x s2=%02x lvl=%u dir=%d vbus=%d chg=%d done=%d present=%d",s1,s2,lvl,dir,(int)g_batt.vbus,(int)g_batt.charging,(int)g_batt.done,(int)g_batt.present);
 }
+static bool axp_write(uint8_t reg,uint8_t val){ if(!axp_read_dev)return false; uint8_t b[2]={reg,val}; return i2c_master_transmit(axp_read_dev,b,2,100)==ESP_OK; }
+// Restore the V2-proven AXP2101 PWRKEY IRQ flow from 870d1b4. These are the only
+// V2 PMU writes: INTEN2 0x41 bit3 enables PWRON short-press, and INTSTS 0x48-0x4A
+// are write-one-to-clear status registers. In particular, no V2 rail register is
+// touched. The PMIC's independent long-hold shutdown remains a hardware action.
+static void axp_pkey_setup(){
+  if(!i2c_bus)return;
+  if(!axp_read_dev){ i2c_device_config_t c={.dev_addr_length=I2C_ADDR_BIT_LEN_7,.device_address=0x34,.scl_speed_hz=400000}; if(i2c_master_bus_add_device(i2c_bus,&c,&axp_read_dev)!=ESP_OK){axp_read_dev=nullptr;return;} }
+  uint8_t reg=0x41,en=0;
+  bool armed=i2c_master_transmit_receive(axp_read_dev,&reg,1,&en,1,50)==ESP_OK&&axp_write(0x41,en|0x08);
+  bool cleared=axp_write(0x48,0xFF)&&axp_write(0x49,0xFF)&&axp_write(0x4A,0xFF);
+  uint8_t verify=axp_read(0x41);
+  if(armed&&cleared&&(verify&0x08))ESP_LOGI(TAG,"AXP PWRKEY IRQ armed (INTEN2=%02x); hardware long-hold shutdown retained",verify);
+  else ESP_LOGE(TAG,"AXP PWRKEY IRQ setup failed (INTEN2=%02x)",verify);
+}
+// One event per POWER short press. INTSTS2 bit3 is latched even while the panel
+// is off, so polling this path remains the reliable wake control.
+static bool axp_pkey_short(){
+  if(!axp_read_dev)return false;
+  uint8_t reg=0x49,s=0;
+  if(i2c_master_transmit_receive(axp_read_dev,&reg,1,&s,1,50)!=ESP_OK)return false;
+  if(s&0x08){ axp_write(0x49,0x08); return true; }
+  return false;
+}
 // Toggle the AMOLED display for battery saving (display off command, not sleep — wakes
-// instantly). Driven only by a physical BOOT long-press; there is no auto-timeout.
+// instantly). Driven only by physical AXP2101 POWER short-press; no auto-timeout.
 static void set_screen(bool on){
   if(on==screen_on)return;
   screen_on=on;
@@ -265,6 +296,7 @@ static void draw(){
   rect(0,0,W,H,BLACK); char b[64];
   auto& network=NetworkPortal::GetInstance();
   if(network.IsPortalActive()){
+    if(privacy_mode)text_right(352,8,"PRIVATE",AMBER,2);
     text(20,24,"COINBASE SETUP",WHITE,3);
     text(20,82,"CONNECT WI-FI:",MUTED,2);
     text(20,112,network.GetApSsid().c_str(),BLUE,2);
@@ -283,6 +315,7 @@ static void draw(){
   bool feed_problem=feed_status!=ST_UPDATED&&feed_status!=ST_STARTING;
   const char*page=selected_chart>=0?assets[selected_chart].name:(detail?"POSITIONS":"PRICES");
   text_right(352,28,page,MUTED,2);
+  if(privacy_mode)text(124,8,"PRIVATE",AMBER,2);
   // Prices stream live (~2s), so there is no refresh countdown to show. Only warn
   // in the corner when the feed actually goes stale or offline.
   if(stale||!wifi_up||feed_problem){
@@ -301,7 +334,7 @@ static void draw(){
     auto&a=assets[selected_chart];
     rect(16,top,336,338,CARD);
     text_bold(28,top+8,a.name,WHITE,3);
-    fmt_money(b,sizeof(b),a.price); text(28+(int)strlen(a.name)*18+12,top+14,b,AMBER,2);
+    fmt_money(b,sizeof(b),a.price); text(28+(int)strlen(a.name)*18+12,top+8,b,AMBER,3);
     double pct=chart_change_pct(a); snprintf(b,sizeof(b),"%+.2f%%",pct); text_right(340,top+14,b,pct>=0?GREEN:RED,2);
     int gx=32,gy=top+50,gw=304; char t[80];
     if(a.candle_count){
@@ -311,14 +344,15 @@ static void draw(){
       double candle_lo=0,candle_hi=0,max_volume=0; candle_bounds(a,candle_lo,candle_hi,max_volume);
       double lo=candle_lo,hi=candle_hi;
       if(a.price>0&&std::isfinite(a.price)){lo=std::min(lo,a.price);hi=std::max(hi,a.price);}
-      if(a.pos.open&&a.pos.entry>0){lo=std::min(lo,a.pos.entry);hi=std::max(hi,a.pos.entry);}
       double range=hi-lo;
       if(range<1e-9){double pad=std::max(fabs(hi)*0.0005,1e-6);lo-=pad;hi+=pad;}
       else {double pad=range*0.04;lo-=pad;hi+=pad;}
+      // Entry no longer forces the scale; see entry_in_view for the near-range policy.
+      bool show_entry=!privacy_mode&&a.pos.open&&entry_in_view(a.pos.entry,lo,hi);
       for(int i=0;i<=4;i++){int yy=gy+price_h*i/4;draw_line(gx,yy,gx+gw-1,yy,GRID);}
       auto py=[&](double v){double n=(v-lo)/(hi-lo);n=std::max(0.0,std::min(1.0,n));return gy+price_h-1-(int)lround(n*(price_h-1));};
       int entry_y=-1;
-      if(a.pos.open&&a.pos.entry>0){
+      if(show_entry){
         entry_y=py(a.pos.entry);
         for(int X=gx;X<gx+gw;X+=10)draw_line(X,entry_y,std::min(X+4,gx+gw-1),entry_y,AMBER);
       }
@@ -346,16 +380,16 @@ static void draw(){
       int yb=gy+price_h+8;
       fmt_money(b,sizeof(b),candle_lo);snprintf(t,sizeof(t),"LO %s",b);text(gx,yb,t,MUTED,2);
       fmt_money(b,sizeof(b),candle_hi);snprintf(t,sizeof(t),"HI %s",b);text_right(gx+gw,yb,t,MUTED,2);
-      candle_window(b,sizeof(b),a);text(gx,yb+24,b,MUTED,2);text_right(gx+gw,yb+24,"WIDTH=VOL",MUTED,2);
     } else {
       // Legacy/partial feeds retain the former close-only expanded line chart.
       int gh=188; double lo=0,hi=0; bool hb=history_bounds(a,lo,hi);
-      if(a.pos.open&&a.pos.entry>0){if(!hb){lo=hi=a.pos.entry;hb=true;}else{lo=std::min(lo,a.pos.entry);hi=std::max(hi,a.pos.entry);}}
       if(!hb){lo=0;hi=1;}
       if(fabs(hi-lo)<1e-9){double pad=std::max(fabs(hi)*0.0005,1e-6);lo-=pad;hi+=pad;}
+      // Same policy as the candle chart: entry never forces the scale.
+      bool show_entry=!privacy_mode&&hb&&a.pos.open&&entry_in_view(a.pos.entry,lo,hi);
       for(int i=0;i<=4;i++){int yy=gy+gh*i/4;draw_line(gx,yy,gx+gw-1,yy,GRID);}
       auto py=[&](double v){double n=(v-lo)/(hi-lo);n=std::max(0.0,std::min(1.0,n));return gy+gh-1-(int)lround(n*(gh-1));};
-      if(a.pos.open&&a.pos.entry>0){int ey=py(a.pos.entry);for(int X=gx;X<gx+gw;X+=10)draw_line(X,ey,std::min(X+4,gx+gw-1),ey,AMBER);text(gx+2,ey-16,"ENTRY",AMBER,2);}
+      if(show_entry){int ey=py(a.pos.entry);for(int X=gx;X<gx+gw;X+=10)draw_line(X,ey,std::min(X+4,gx+gw-1),ey,AMBER);text(gx+2,ey-16,"ENTRY",AMBER,2);}
       if(a.history_count>=2){
         auto px=[&](int i){return gx+(i*(gw-1))/(a.history_count-1);};
         uint16_t col=history_at(a,a.history_count-1)>=history_at(a,0)?GREEN:RED;
@@ -371,34 +405,49 @@ static void draw(){
     // Portfolio summary now lives only on the POSITIONS page.
     rect(16,top,336,64,CARD);
     text(28,top+8,"PORTFOLIO",MUTED,2);
-    fmt_money(b,sizeof(b),balance); text(28,top+32,b,WHITE,3);
-    snprintf(b,sizeof(b),"UPL %+.2f",total_pnl); text_right(340,top+8,b,total_pnl>=0?GREEN:RED,2);
-    snprintf(b,sizeof(b),"RPL %+.2f",realized_pnl_today); text_right(340,top+40,b,realized_pnl_today>=0?GREEN:RED,2);
-    int y=top+72;
-    int open_total=0; for(auto&a:assets)if(a.pos.open)open_total++;
-    snprintf(b,sizeof(b),"OPEN POSITIONS %d",open_total); text(16,y,b,WHITE,2); y+=24;
-    if(!open_total){ text(24,y,"NONE",MUTED,2); y+=28; }
-    int shown=0;
-    for(auto&a:assets){ if(!a.pos.open)continue; if(y+56>392)break;
-      uint16_t sc=(a.pos.side.size()&&(a.pos.side[0]=='S'||a.pos.side[0]=='s'))?RED:GREEN;
-      rect(16,y,336,56,CARD); rect(16,y,6,56,sc);
-      char sd[12]; snprintf(sd,sizeof(sd),"%s",a.pos.side.c_str()); to_upper(sd);
-      char nm[28]; snprintf(nm,sizeof(nm),"%s %s",a.name,sd); text(28,y+6,nm,WHITE,2);
-      fmt_money(b,sizeof(b),a.price); text_right(350,y+4,b,AMBER,3);            // current price, on top
-      char entry[24]; fmt_entry_money(entry,sizeof(entry),a.pos.entry); snprintf(b,sizeof(b),"%.4g @ %s",a.pos.size,entry); text(28,y+34,b,MUTED,2); // size @ live average entry, always precise enough to see changes
-      snprintf(b,sizeof(b),"U%+.2f",a.pos.pnl); text_right(350,y+34,b,a.pos.pnl>=0?GREEN:RED,2);
-      y+=60; shown++;
+    if(privacy_mode){
+      text(28,top+32,"$********",WHITE,3);
+      text_right(340,top+8,"UPL ********",MUTED,2);
+      text_right(340,top+40,"RPL ********",MUTED,2);
+    } else {
+      fmt_money(b,sizeof(b),balance); text(28,top+32,b,WHITE,3);
+      snprintf(b,sizeof(b),"UPL %+.2f",total_pnl); text_right(340,top+8,b,total_pnl>=0?GREEN:RED,2);
+      snprintf(b,sizeof(b),"RPL %+.2f",realized_pnl_today); text_right(340,top+40,b,realized_pnl_today>=0?GREEN:RED,2);
     }
-    if(open_total>shown){ snprintf(b,sizeof(b),"+%d MORE",open_total-shown); text(24,y,b,AMBER,2); y+=24; }
-    if(y+40<392){
-      snprintf(b,sizeof(b),"CLOSED TODAY %u",(unsigned)closed_today.size()); text(16,y,b,WHITE,2); y+=24;
-      if(closed_today.empty())text(24,y,"NONE YET",MUTED,2);
-      else{ int cs=0; for(auto&p:closed_today){ if(y+38>392)break; rect(16,y,336,36,CARD); char sd[12]; snprintf(sd,sizeof(sd),"%s",p.side.c_str()); to_upper(sd); snprintf(b,sizeof(b),"%s %s",p.symbol.c_str(),sd); text(24,y+4,b,WHITE,2); snprintf(b,sizeof(b),"R%+.2f",p.pnl); text_right(350,y+4,b,p.pnl>=0?GREEN:RED,2); snprintf(b,sizeof(b),"SIZE %.4g",p.size); text(24,y+20,b,MUTED,2); y+=40; cs++; } if((int)closed_today.size()>cs&&y+16<=392){snprintf(b,sizeof(b),"+%u MORE",(unsigned)closed_today.size()-cs);text(24,y,b,AMBER,2);} }
+    int y=top+72;
+    if(privacy_mode){
+      text(16,y,"ACCOUNT EXPOSURE",WHITE,2); y+=28;
+      rect(16,y,336,112,CARD);
+      text(28,y+12,"POSITIONS  ********",MUTED,2);
+      text(28,y+40,"QUANTITY   ********",MUTED,2);
+      text(28,y+68,"ENTRY/P&L  ********",MUTED,2);
+      text(28,y+96,"CLOSED     ********",MUTED,2);
+    } else {
+      int open_total=0; for(auto&a:assets)if(a.pos.open)open_total++;
+      snprintf(b,sizeof(b),"OPEN POSITIONS %d",open_total); text(16,y,b,WHITE,2); y+=24;
+      if(!open_total){ text(24,y,"NONE",MUTED,2); y+=28; }
+      int shown=0;
+      for(auto&a:assets){ if(!a.pos.open)continue; if(y+56>392)break;
+        uint16_t sc=(a.pos.side.size()&&(a.pos.side[0]=='S'||a.pos.side[0]=='s'))?RED:GREEN;
+        rect(16,y,336,56,CARD); rect(16,y,6,56,sc);
+        char sd[12]; snprintf(sd,sizeof(sd),"%s",a.pos.side.c_str()); to_upper(sd);
+        char nm[28]; snprintf(nm,sizeof(nm),"%s %s",a.name,sd); text(28,y+6,nm,WHITE,2);
+        fmt_money(b,sizeof(b),a.price); text_right(350,y+4,b,AMBER,3);            // current price, on top
+        char entry[24]; fmt_entry_money(entry,sizeof(entry),a.pos.entry); snprintf(b,sizeof(b),"%.4g @ %s",a.pos.size,entry); text(28,y+34,b,MUTED,2); // size @ live average entry, always precise enough to see changes
+        snprintf(b,sizeof(b),"U%+.2f",a.pos.pnl); text_right(350,y+34,b,a.pos.pnl>=0?GREEN:RED,2);
+        y+=60; shown++;
+      }
+      if(open_total>shown){ snprintf(b,sizeof(b),"+%d MORE",open_total-shown); text(24,y,b,AMBER,2); y+=24; }
+      if(y+40<392){
+        snprintf(b,sizeof(b),"CLOSED TODAY %u",(unsigned)closed_today.size()); text(16,y,b,WHITE,2); y+=24;
+        if(closed_today.empty())text(24,y,"NONE YET",MUTED,2);
+        else{ int cs=0; for(auto&p:closed_today){ if(y+38>392)break; rect(16,y,336,36,CARD); char sd[12]; snprintf(sd,sizeof(sd),"%s",p.side.c_str()); to_upper(sd); snprintf(b,sizeof(b),"%s %s",p.symbol.c_str(),sd); text(24,y+4,b,WHITE,2); snprintf(b,sizeof(b),"R%+.2f",p.pnl); text_right(350,y+4,b,p.pnl>=0?GREEN:RED,2); snprintf(b,sizeof(b),"SIZE %.4g",p.size); text(24,y+20,b,MUTED,2); y+=40; cs++; } if((int)closed_today.size()>cs&&y+16<=392){snprintf(b,sizeof(b),"+%u MORE",(unsigned)closed_today.size()-cs);text(24,y,b,AMBER,2);} }
+      }
     }
   } else {
     // PRICES page: open positions get taller/bolder rows with an amber live price.
     int y=top; px_row_n=0;
-    for(int i=0;i<5;i++){ auto&a=assets[i]; bool open=a.pos.open; int rh=open?64:50;
+    for(int i=0;i<5;i++){ auto&a=assets[i]; bool open=!privacy_mode&&a.pos.open; int rh=open?64:50;
       px_row_y[px_row_n]=y; px_row_h[px_row_n]=rh; px_row_asset[px_row_n]=i; px_row_n++;
       rect(16,y,336,rh,CARD);
       if(open){
@@ -413,7 +462,7 @@ static void draw(){
         text(24,y+6,a.name,WHITE,2);
         fmt_money(b,sizeof(b),a.price); text(96,y+6,b,MUTED,2);
         sparkline(a,210,y+4,140,18,false);
-        text(24,y+28,"FLAT",MUTED,2);
+        text(24,y+28,privacy_mode?"MARKET":"FLAT",MUTED,2);
         double pct=history_change_pct(a); if(a.history_count>=2){snprintf(b,sizeof(b),"%+.2f%%",pct);text_right(350,y+28,b,pct>=0?GREEN:RED,2);}
       }
       y+=rh+2;
@@ -422,6 +471,15 @@ static void draw(){
   // Single full-width view toggle. No refresh button — prices are live.
   { const char*bl=selected_chart>=0||detail?"PRICES":"POSITIONS"; rect(16,400,336,36,BLUE); text_center(16,336,410,bl,WHITE,2); }
   flush_frame();
+}
+// Exactly mirrors the blue bottom button: chart -> PRICES, PRICES -> POSITIONS,
+// POSITIONS -> PRICES. Touch and BOOT both call this single action.
+static void activate_bottom_action(){ if(selected_chart>=0){selected_chart=-1;detail=false;} else detail=!detail; }
+static bool toggle_privacy(){
+  if(state_mux)xSemaphoreTake(state_mux,portMAX_DELAY);
+  privacy_mode=!privacy_mode; bool enabled=privacy_mode;
+  if(state_mux)xSemaphoreGive(state_mux);
+  return enabled;
 }
 // draw() reads feed state owned by the network task, so serialize it with state_mux.
 static void draw_locked(){ if(state_mux)xSemaphoreTake(state_mux,portMAX_DELAY); draw(); if(state_mux)xSemaphoreGive(state_mux); }
@@ -504,7 +562,8 @@ static bool fetch(){
   cJSON*rd=cJSON_GetObjectItem(d,"realized_date"); if(cJSON_IsString(rd))realized_date=rd->valuestring; int open_count=0; for(auto&a:assets)if(a.pos.open)open_count++;
   bool account_stale=cJSON_IsTrue(cJSON_GetObjectItem(d,"positions_stale"));
   double btc_entry=assets[0].pos.open?assets[0].pos.entry:0;
-  ESP_LOGI(TAG,"parsed bal=%.2f open=%d btc_entry=%.2f candles=%d interval=%lus upl=%.2f rpl_today=%.2f closed=%u date=%s",balance,open_count,btc_entry,candle_total,(unsigned long)candle_interval_seconds,total_pnl,realized_pnl_today,(unsigned)closed_today.size(),realized_date.c_str());
+  if(privacy_mode)ESP_LOGI(TAG,"parsed account=PRIVATE candles=%d interval=%lus",candle_total,(unsigned long)candle_interval_seconds);
+  else ESP_LOGI(TAG,"parsed bal=%.2f open=%d btc_entry=%.2f candles=%d interval=%lus upl=%.2f rpl_today=%.2f closed=%u date=%s",balance,open_count,btc_entry,candle_total,(unsigned long)candle_interval_seconds,total_pnl,realized_pnl_today,(unsigned)closed_today.size(),realized_date.c_str());
   last_ok_ms=esp_timer_get_time()/1000; feed_status=account_stale?ST_ACCOUNT_STALE:ST_UPDATED;
   if(state_mux)xSemaphoreGive(state_mux);
   cJSON_Delete(d); data_dirty=true; return true;
@@ -519,8 +578,9 @@ static i2c_master_bus_handle_t ensure_i2c_bus(){
 // Per-variant panel power/reset. Both use TCA9554 outputs 0, 1, and 2 at 0x20,
 // asserted before the first panel command; doing this after panel_init is too late.
 // V1 additionally requires the AXP2101 rail setup at 0x34 (the proven ClawBuddy
-// sequence); V2 must NEVER receive those PMU writes — they blank the CO5300 panel
-// while every driver init still logs success.
+// sequence); V2 must NEVER receive those rail writes — they blank the CO5300 panel
+// while every driver init still logs success. V2 keeps its existing PMIC long-hold
+// shutdown configuration; only the separately proven IRQ/status writes occur later.
 static void panel_power_reset(){
   ensure_i2c_bus();
   ESP_ERROR_CHECK(esp_io_expander_new_i2c_tca9554(i2c_bus,ESP_IO_EXPANDER_I2C_TCA9554_ADDRESS_000,&io_expander));
@@ -537,7 +597,7 @@ static void panel_power_reset(){
   i2c_device_config_t axp_cfg={.dev_addr_length=I2C_ADDR_BIT_LEN_7,.device_address=0x34,.scl_speed_hz=400000};
   ESP_ERROR_CHECK(i2c_master_bus_add_device(i2c_bus,&axp_cfg,&axp));
   static const uint8_t axp_seq[][2]={
-    {0x22,0b110},{0x27,0x10},                       // PWRON>OFFLEVEL poweroff source, 4s hold
+    {0x22,0b110},{0x27,0x10},                       // Hardware PWRON poweroff, 4s long hold
     {0x80,0x01},{0x90,0x00},{0x91,0x00},            // only DC1 on, all LDOs off
     {0x82,(3300-1500)/100},{0x92,(3300-500)/100},   // DC1 3.3V, ALDO1 3.3V
     {0x90,0x01},                                    // enable ALDO1
@@ -572,7 +632,7 @@ static void axp_dump(const char*phase){
   if(!i2c_bus)return;
   i2c_master_dev_handle_t dev; i2c_device_config_t c={.dev_addr_length=I2C_ADDR_BIT_LEN_7,.device_address=0x34,.scl_speed_hz=400000};
   if(i2c_master_bus_add_device(i2c_bus,&c,&dev)!=ESP_OK){ESP_LOGW(TAG,"axp dump: add device failed");return;}
-  static const uint8_t regs[]={0x00,0x01,0x80,0x90,0x91,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99};
+  static const uint8_t regs[]={0x00,0x01,0x22,0x27,0x41,0x49,0x80,0x90,0x91,0x92,0x93,0x94,0x95,0x96,0x97,0x98,0x99};
   char line[120]; int off=0;
   for(uint8_t r:regs){ uint8_t v=0; if(i2c_master_transmit_receive(dev,&r,1,&v,1,100)==ESP_OK&&off<(int)sizeof(line)-8) off+=snprintf(line+off,sizeof(line)-off,"%02x=%02x ",r,v); }
   i2c_master_bus_rm_device(dev);
@@ -655,6 +715,7 @@ static void init_rest(){
   axp_dump("touch"); ESP_LOGI(TAG,"PHASE7: touch %s",touch?"ready":"absent"); vTaskDelay(pdMS_TO_TICKS(PHASE_DELAY_MS));
   gpio_config_t gb={.pin_bit_mask=1ULL<<GPIO_NUM_0,.mode=GPIO_MODE_INPUT,.pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,.intr_type=GPIO_INTR_DISABLE}; gpio_config(&gb);
   update_battery();   // seed the power indicator before the first UI frame
+  axp_pkey_setup();   // POWER short press; PMIC long hold remains full hardware shutdown
 }
 // Network fetch runs on its own task so the blocking HTTP round trip never stalls
 // touch sampling or rendering in the UI loop. It writes shared feed state under
@@ -684,7 +745,7 @@ extern "C" void app_main(){
   state_mux=xSemaphoreCreateMutex();
   xTaskCreate(fetch_task,"feed",12288,nullptr,4,nullptr);
   xTaskCreate(touch_task,"touch",3072,nullptr,6,nullptr);
-  uint64_t last_draw=0,button_at=0,last_batt=0;
+  uint64_t last_draw=0,button_at=0,last_batt=0,last_pkey=0;
   bool button_down=false,ota_hold_handled=false,shown_portal=false,shown_armed=false;
   // Tight UI loop: sample touch every ~20ms, redraw only when something changed
   // (new feed data, a tap, battery, or the periodic stale-check heartbeat). With
@@ -696,11 +757,13 @@ extern "C" void app_main(){
     bool portal=network.IsPortalActive(),armed=network.IsOtaArmed();
     if(portal!=shown_portal||armed!=shown_armed){shown_portal=portal;shown_armed=armed;need_draw=true;}
     if(data_dirty){data_dirty=false;need_draw=true;}
+    // Poll even with the display off: AXP IRQ status is the wake path.
+    if(now-last_pkey>=100){last_pkey=now;if(axp_pkey_short()){set_screen(!screen_on);if(screen_on)need_draw=true;}}
     int tx=tap_x,ty=tap_y;
     if(tx>=0){
       tap_x=-1; tap_y=-1;   // consume the latched press (ignored while the screen is off)
       if(!portal&&screen_on){
-        if(ty>=390){ if(selected_chart>=0)selected_chart=-1; else detail=!detail; need_draw=true; }
+        if(ty>=390){ activate_bottom_action(); need_draw=true; }
         else if(selected_chart>=0&&ty>=54&&ty<390){ selected_chart=(selected_chart+(tx<W/2?4:1))%5; need_draw=true; }
         else if(!detail&&ty>=54&&ty<390){ for(int k=0;k<px_row_n;k++) if(ty>=px_row_y[k]&&ty<px_row_y[k]+px_row_h[k]){ selected_chart=px_row_asset[k]; need_draw=true; break; } }
       }
@@ -708,10 +771,10 @@ extern "C" void app_main(){
     bool bb=gpio_get_level(GPIO_NUM_0)==0;
     if(bb&&!button_down){button_at=now;ota_hold_handled=false;}
     if(bb&&!ota_hold_handled&&now-button_at>=10000){network.ArmOta();ota_hold_handled=true;need_draw=true;}
-    if(!bb&&button_down&&!ota_hold_handled&&!portal){
+    if(!bb&&button_down&&!ota_hold_handled){
       uint64_t held=now-button_at;
-      if(held>=500){ set_screen(!screen_on); if(screen_on)need_draw=true; }   // BOOT long-press: screen on/off (works even while off)
-      else if(screen_on){ if(selected_chart>=0)selected_chart=-1; else detail=!detail; need_draw=true; }  // BOOT short-press: view toggle
+      if(held>=800){ bool enabled=toggle_privacy(); need_draw=screen_on; ESP_LOGI(TAG,"privacy %s",enabled?"ON":"OFF"); }
+      else if(!portal&&screen_on){ activate_bottom_action(); need_draw=true; }
     }
     button_down=bb;
     if(now-last_batt>=1000){update_battery();last_batt=now;need_draw=true;}
