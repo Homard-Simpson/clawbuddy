@@ -1,3 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
+if(DEFINED ENV{COINBASE_AMOLED_IMAGE_VERSION})
+    set(PROJECT_VER "$ENV{COINBASE_AMOLED_IMAGE_VERSION}")
+else()
+    set(PROJECT_VER "0.0.0-development")
+endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(coinbase_amoled_1_8)

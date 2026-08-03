@@ -4,5 +4,10 @@ sdkconfig.old
 main/feed_config.h
 managed_components/
 dependencies.lock
+verification-logs/
+releases/
+build-variants/
+flash-staging/
+release-artifacts/
 # Flash dumps and built firmware embed the feed token / NVS Wi-Fi creds; keep out of git.
 *.bin

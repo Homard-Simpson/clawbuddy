@@ -1,8 +1,10 @@
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <vector>
 #include "cJSON.h"
@@ -26,17 +28,26 @@
 #include "esp_lcd_touch.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
 #include "esp_io_expander.h"
 #include "esp_io_expander_tca9554.h"
 #include "esp_ota_ops.h"
+#include "esp_sleep.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "network_portal.h"
+#include "auto_ota.h"
+#include "key_levels.h"
+#include "bollinger_bands.h"
+#include "control_policy.h"
+#include "runtime_operation.h"
+#include "ui_helpers.h"
 
 #define PROGMEM
 #include "glcdfont.h"
@@ -63,20 +74,27 @@ static uint16_t *fb, *txbuf;
 static SemaphoreHandle_t tx_done;
 static i2c_master_bus_handle_t i2c_bus;
 static esp_io_expander_handle_t io_expander;
-static bool wifi_up=false, detail=false, force_fetch=true;
+static std::atomic<bool> wifi_up{false};
+static bool detail=false;
+static std::atomic<bool> force_fetch{true};
 static int selected_chart=-1;
 static uint32_t feed_refresh_seconds=30,history_sample_seconds=30,candle_interval_seconds=0;
 static uint64_t last_ok_ms=0;
 static int px_row_y[5],px_row_h[5],px_row_asset[5],px_row_n=0;
 // Feed state is produced by a dedicated network task and consumed by the UI loop.
-// status is an int enum (atomic to read/write across tasks); the heavier shared
+// Status flags are atomic across tasks; the heavier shared
 // state (prices, positions, closed_today vector) is guarded by state_mux.
 enum { ST_STARTING=0, ST_UPDATED, ST_NOWIFI, ST_HTTPERR, ST_JSONERR, ST_UNSAFE, ST_ACCOUNT_STALE };
-static volatile int feed_status=ST_STARTING, feed_http_code=0;
-static volatile bool data_dirty=true;
+static std::atomic<int> feed_status{ST_STARTING};
+static std::atomic<int> feed_http_code{0};
+static std::atomic<bool> data_dirty{true};
 static SemaphoreHandle_t state_mux=nullptr;
-static volatile int tap_x=-1, tap_y=-1;   // latched new-press from the touch task; -1 = none
-static bool screen_on=true;                // AXP2101 POWER short-press display toggle; no auto-timeout
+static EventGroupHandle_t standby_events=nullptr;
+static constexpr EventBits_t STANDBY_REQUEST=BIT0, FEED_IDLE=BIT1, TOUCH_IDLE=BIT2;
+static constexpr uint32_t NO_PENDING_TAP=UINT32_MAX;
+static std::atomic<uint32_t> pending_tap{NO_PENDING_TAP};
+static std::atomic<bool> touch_input_enabled{true};
+static bool screen_on=true;
 static bool privacy_mode=false;            // Deliberately visible after every boot; no persistence
 struct Position { bool open=false; std::string side="-"; double size=0,entry=0,pnl=0; };
 struct ClosedPosition { std::string symbol="-",side="-"; double size=0,pnl=0; };
@@ -85,22 +103,31 @@ struct Asset {
   const char *name; double price=0; Position pos;
   double history[HISTORY_SAMPLES]={}; uint8_t history_count=0,history_head=0;
   Candle candles[CANDLE_SAMPLES]={}; uint8_t candle_count=0;
+  KeyLevels key_levels;
   explicit Asset(const char*n):name(n){}
 };
 static Asset assets[]={Asset("BTC"),Asset("SOL"),Asset("XLM"),Asset("HYPE"),Asset("ETH")};
 static std::vector<ClosedPosition> closed_today;
+
+static void clear_pending_tap(){pending_tap.store(NO_PENDING_TAP,std::memory_order_release);}
+static void latch_pending_tap(int x,int y){
+  uint32_t packed=(static_cast<uint32_t>(x)&0xffffu)<<16 |
+                  (static_cast<uint32_t>(y)&0xffffu);
+  pending_tap.store(packed,std::memory_order_release);
+}
 static double balance=0, total_pnl=0, realized_pnl_today=0;
 static std::string realized_date="---- -- --";
-// AXP2101 PMU battery/power state. V2 writes are restricted to the proven PWRKEY
-// IRQ enable/status registers below; never write its rail registers (0x80-0x99),
-// which blank the CO5300 panel. Battery register semantics match the proven
+// AXP2101 PMU battery/power state. Runtime writes are restricted to the proven
+// PWRKEY IRQ enable/status registers (0x41/0x49); never write V2 rail registers
+// 0x80-0x99, because those writes can blank the CO5300 panel. Battery register
+// semantics match the proven
 // ClawBuddy Axp2101 driver: level=reg 0xA4, charge dir=reg 0x01[6:5], done=0x01[2:0]==4.
 struct Battery { bool present=false; int level=0; bool charging=false, done=false, vbus=false; };
 static Battery g_batt;
 static i2c_master_dev_handle_t axp_read_dev=nullptr;
 
 static uint16_t rgb(uint8_t r,uint8_t g,uint8_t b){ return __builtin_bswap16(((r&0xF8)<<8)|((g&0xFC)<<3)|(b>>3)); }
-static const uint16_t BLACK=rgb(5,8,15),CARD=rgb(18,24,38),GRID=rgb(45,57,78),MUTED=rgb(190,198,214),WHITE=rgb(245,247,250),GREEN=rgb(48,209,88),RED=rgb(255,69,58),BLUE=rgb(55,126,255),AMBER=rgb(255,180,0);
+static const uint16_t BLACK=rgb(5,8,15),CARD=rgb(18,24,38),GRID=rgb(45,57,78),MUTED=rgb(190,198,214),WHITE=rgb(245,247,250),GREEN=rgb(48,209,88),RED=rgb(255,69,58),BLUE=rgb(55,126,255),AMBER=rgb(255,180,0),BB_UPPER=rgb(55,220,255),BB_LOWER=rgb(180,105,255),BB_MIDDLE=rgb(105,125,155),AXIS_BLUE=rgb(125,175,210);
 static void rect(int x,int y,int w,int h,uint16_t c){ x=std::max(0,x); y=std::max(0,y); w=std::min(w,W-x); h=std::min(h,H-y); for(int yy=y;yy<y+h;yy++) std::fill(fb+yy*W+x,fb+yy*W+x+w,c); }
 static int text_width(const char*s,int scale=2){ scale=std::max(2,scale); return (int)strlen(s)*6*scale; }
 static void text(int x,int y,const char*s,uint16_t c,int scale=2){ scale=std::max(2,scale); for(;*s;s++,x+=6*scale){ unsigned ch=(unsigned char)*s; if(ch<32||ch>127) ch='?'; for(int i=0;i<5;i++){ uint8_t col=font[ch*5+i]; for(int j=0;j<8;j++) if(col&(1<<j)) rect(x+i*scale,y+j*scale,scale,scale,c); } } }
@@ -111,6 +138,14 @@ static void to_upper(char*s){ for(;*s;s++) if(*s>='a'&&*s<='z') *s=(char)(*s-'a'
 static void fmt_money(char *b,size_t n,double v){ double a=fabs(v); if(a>=10000) snprintf(b,n,"$%.0f",v); else if(a>=100) snprintf(b,n,"$%.2f",v); else if(a>=1) snprintf(b,n,"$%.3f",v); else snprintf(b,n,"$%.5f",v); }
 static void fmt_entry_money(char *b,size_t n,double v){ double a=fabs(v); if(a>=100) snprintf(b,n,"$%.2f",v); else if(a>=1) snprintf(b,n,"$%.3f",v); else snprintf(b,n,"$%.5f",v); }
 static void button(int x,int y,int w,const char *label,uint16_t c){ rect(x,y,w,36,c); text(x+10,y+10,label,WHITE,2); }
+static void draw_key_level_row(const Asset&a,int left,int right,int y){
+  char price[24],label[28]; double support=0,resistance=0;
+  nearest_key_levels(a.key_levels,a.price,support,resistance);
+  if(support>0){fmt_money(price,sizeof(price),support);snprintf(label,sizeof(label),"S %s",price);text(left,y,label,GREEN,2);}
+  else text(left,y,"S --",MUTED,2);
+  if(resistance>0){fmt_money(price,sizeof(price),resistance);snprintf(label,sizeof(label),"R %s",price);text_right(right,y,label,RED,2);}
+  else text_right(right,y,"R --",MUTED,2);
+}
 static void pixel(int x,int y,uint16_t c){ if(x>=0&&x<W&&y>=0&&y<H)fb[y*W+x]=c; }
 static void draw_line(int x0,int y0,int x1,int y1,uint16_t c,int thickness=1){
   int dx=abs(x1-x0),sx=x0<x1?1:-1,dy=-abs(y1-y0),sy=y0<y1?1:-1,err=dx+dy;
@@ -191,6 +226,14 @@ static bool load_candles(Asset&a,cJSON*root){
   }
   return a.candle_count>0;
 }
+static void load_key_levels(Asset&a,cJSON*root){
+  clear_key_levels(a.key_levels);
+  if(!cJSON_IsObject(root))return;
+  cJSON*series=cJSON_GetObjectItemCaseSensitive(root,a.name);
+  if(!cJSON_IsArray(series))return;
+  cJSON*item=nullptr;
+  cJSON_ArrayForEach(item,series)if(cJSON_IsNumber(item))add_key_level(a.key_levels,item->valuedouble);
+}
 static bool candle_bounds(const Asset&a,double&lo,double&hi,double&max_volume){
   if(!a.candle_count)return false;
   lo=a.candles[0].low; hi=a.candles[0].high; max_volume=0;
@@ -232,7 +275,16 @@ static void history_window(char*b,size_t n,const Asset&a){
   else snprintf(b,n,"%luS WINDOW",(unsigned long)seconds);
 }
 static void flush_frame(){ for(int y=0;y<H;y+=TX_LINES){ int rows=std::min(TX_LINES,H-y); memcpy(txbuf,fb+y*W,W*rows*sizeof(uint16_t)); ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel,0,y,W,y+rows,txbuf)); if(xSemaphoreTake(tx_done,pdMS_TO_TICKS(2000))!=pdTRUE){ESP_LOGE(TAG,"LCD transfer timeout y=%d",y);break;} } }
-static uint8_t axp_read(uint8_t reg){ if(!axp_read_dev)return 0xFF; uint8_t v=0; return i2c_master_transmit_receive(axp_read_dev,&reg,1,&v,1,100)==ESP_OK?v:0xFF; }
+static bool axp_read_checked(uint8_t reg,uint8_t&value){
+  if(!axp_read_dev)return false;
+  return i2c_master_transmit_receive(axp_read_dev,&reg,1,&value,1,100)==ESP_OK;
+}
+static uint8_t axp_read(uint8_t reg){ uint8_t value=0; return axp_read_checked(reg,value)?value:0xFF; }
+static bool refresh_vbus_present(){
+  uint8_t status=0;
+  if(axp_read_checked(0x00,status))g_batt.vbus=(status&0x20)!=0;
+  return g_batt.vbus;
+}
 static void update_battery(){
   if(!i2c_bus)return;
   if(!axp_read_dev){ i2c_device_config_t c={.dev_addr_length=I2C_ADDR_BIT_LEN_7,.device_address=0x34,.scl_speed_hz=400000}; if(i2c_master_bus_add_device(i2c_bus,&c,&axp_read_dev)!=ESP_OK){axp_read_dev=nullptr;return;} }
@@ -245,32 +297,33 @@ static void update_battery(){
   g_batt.level=std::max(0,std::min(100,(int)lvl));
   ESP_LOGI(TAG,"batt s1=%02x s2=%02x lvl=%u dir=%d vbus=%d chg=%d done=%d present=%d",s1,s2,lvl,dir,(int)g_batt.vbus,(int)g_batt.charging,(int)g_batt.done,(int)g_batt.present);
 }
-static bool axp_write(uint8_t reg,uint8_t val){ if(!axp_read_dev)return false; uint8_t b[2]={reg,val}; return i2c_master_transmit(axp_read_dev,b,2,100)==ESP_OK; }
-// Restore the V2-proven AXP2101 PWRKEY IRQ flow from 870d1b4. These are the only
-// V2 PMU writes: INTEN2 0x41 bit3 enables PWRON short-press, and INTSTS 0x48-0x4A
-// are write-one-to-clear status registers. In particular, no V2 rail register is
-// touched. The PMIC's independent long-hold shutdown remains a hardware action.
+// Deliberately narrow PMU write helper: the only runtime PMU writes permitted on
+// either variant are INTEN2 bit3 and INTSTS2 bit3 W1C. In particular, this path
+// cannot address the V2 rail-control range 0x80-0x99.
+static bool axp_irq_write(uint8_t reg,uint8_t prior,uint8_t val){
+  if(!axp_read_dev||!axp_runtime_write_allowed(reg,prior,val))return false;
+  uint8_t b[2]={reg,val}; return i2c_master_transmit(axp_read_dev,b,2,100)==ESP_OK;
+}
 static void axp_pkey_setup(){
   if(!i2c_bus)return;
   if(!axp_read_dev){ i2c_device_config_t c={.dev_addr_length=I2C_ADDR_BIT_LEN_7,.device_address=0x34,.scl_speed_hz=400000}; if(i2c_master_bus_add_device(i2c_bus,&c,&axp_read_dev)!=ESP_OK){axp_read_dev=nullptr;return;} }
   uint8_t reg=0x41,en=0;
-  bool armed=i2c_master_transmit_receive(axp_read_dev,&reg,1,&en,1,50)==ESP_OK&&axp_write(0x41,en|0x08);
-  bool cleared=axp_write(0x48,0xFF)&&axp_write(0x49,0xFF)&&axp_write(0x4A,0xFF);
+  bool read_ok=i2c_master_transmit_receive(axp_read_dev,&reg,1,&en,1,50)==ESP_OK;
+  bool armed=read_ok&&axp_irq_write(0x41,en,en|0x08);
+  bool cleared=axp_irq_write(0x49,0,0x08);
   uint8_t verify=axp_read(0x41);
-  if(armed&&cleared&&(verify&0x08))ESP_LOGI(TAG,"AXP PWRKEY IRQ armed (INTEN2=%02x); hardware long-hold shutdown retained",verify);
-  else ESP_LOGE(TAG,"AXP PWRKEY IRQ setup failed (INTEN2=%02x)",verify);
+  if(armed&&cleared&&(verify&0x08))ESP_LOGI(TAG,"AXP PWRKEY short IRQ armed: INTEN2=0x%02x; only 0x41/0x49 writes used",verify);
+  else ESP_LOGE(TAG,"AXP PWRKEY short IRQ setup failed: INTEN2=0x%02x",verify);
 }
-// One event per POWER short press. INTSTS2 bit3 is latched even while the panel
-// is off, so polling this path remains the reliable wake control.
+// Read and consume one physical POWER short press. INTSTS2 bit3 is latched by
+// the PMIC, so this works both in the normal UI loop and between timer-sliced
+// light sleeps when the AXP IRQ pin is not wired to an ESP32 wake GPIO.
 static bool axp_pkey_short(){
   if(!axp_read_dev)return false;
   uint8_t reg=0x49,s=0;
   if(i2c_master_transmit_receive(axp_read_dev,&reg,1,&s,1,50)!=ESP_OK)return false;
-  if(s&0x08){ axp_write(0x49,0x08); return true; }
-  return false;
+  return (s&0x08)&&axp_irq_write(0x49,0,0x08);
 }
-// Toggle the AMOLED display for battery saving (display off command, not sleep — wakes
-// instantly). Driven only by physical AXP2101 POWER short-press; no auto-timeout.
 static void set_screen(bool on){
   if(on==screen_on)return;
   screen_on=on;
@@ -311,24 +364,29 @@ static void draw(){
     return;
   }
   uint64_t now=esp_timer_get_time()/1000; bool stale=!last_ok_ms||now-last_ok_ms>STALE_MS;
-  draw_battery(16,12);
-  bool feed_problem=feed_status!=ST_UPDATED&&feed_status!=ST_STARTING;
-  const char*page=selected_chart>=0?assets[selected_chart].name:(detail?"POSITIONS":"PRICES");
-  text_right(352,28,page,MUTED,2);
-  if(privacy_mode)text(124,8,"PRIVATE",AMBER,2);
+  constexpr TopBarAnchors top_bar=top_bar_anchors(W);
+  draw_battery(top_bar.left,10);
+  bool wifi=wifi_up.load(std::memory_order_acquire);
+  int current_feed_status=feed_status.load(std::memory_order_acquire);
+  int current_http_code=feed_http_code.load(std::memory_order_acquire);
+  bool feed_problem=current_feed_status!=ST_UPDATED&&current_feed_status!=ST_STARTING;
+  char status[24]{};
   // Prices stream live (~2s), so there is no refresh countdown to show. Only warn
-  // in the corner when the feed actually goes stale or offline.
-  if(stale||!wifi_up||feed_problem){
-    if(stale)snprintf(b,sizeof(b),"STALE");
-    else if(!wifi_up)snprintf(b,sizeof(b),"OFFLINE");
-    else if(feed_status==ST_HTTPERR)snprintf(b,sizeof(b),"HTTP %d",feed_http_code);
-    else if(feed_status==ST_JSONERR)snprintf(b,sizeof(b),"JSON ERR");
-    else if(feed_status==ST_UNSAFE)snprintf(b,sizeof(b),"UNSAFE");
-    else if(feed_status==ST_ACCOUNT_STALE)snprintf(b,sizeof(b),"ACCT STALE");
-    else if(feed_status==ST_NOWIFI)snprintf(b,sizeof(b),"NO WIFI");
-    else snprintf(b,sizeof(b),"FEED ERR");
-    text_right(352,8,b,AMBER,2);
-  }
+  // on the status row when the feed actually goes stale or offline.
+  if(stale||!wifi||feed_problem){
+    if(stale)snprintf(status,sizeof(status),"STALE");
+    else if(!wifi)snprintf(status,sizeof(status),"OFFLINE");
+    else if(current_feed_status==ST_HTTPERR)snprintf(status,sizeof(status),"HTTP %d",current_http_code);
+    else if(current_feed_status==ST_JSONERR)snprintf(status,sizeof(status),"JSON ERR");
+    else if(current_feed_status==ST_UNSAFE)snprintf(status,sizeof(status),"UNSAFE");
+    else if(current_feed_status==ST_ACCOUNT_STALE)snprintf(status,sizeof(status),"ACCT STALE");
+    else if(current_feed_status==ST_NOWIFI)snprintf(status,sizeof(status),"NO WIFI");
+    else snprintf(status,sizeof(status),"FEED ERR");
+  } else if(privacy_mode)snprintf(status,sizeof(status),"PRIVATE");
+  if(status[0])text_center(120,132,12,status,AMBER,2);
+  char clock_text[16]="--:-- --"; time_t wall=time(nullptr); struct tm local{};
+  if(wall>1700000000&&localtime_r(&wall,&local))format_time_12h(local,clock_text,sizeof(clock_text));
+  text_right(top_bar.right,12,clock_text,AXIS_BLUE,2);
   int top=58;
   if(selected_chart>=0){
     auto&a=assets[selected_chart];
@@ -336,21 +394,41 @@ static void draw(){
     text_bold(28,top+8,a.name,WHITE,3);
     fmt_money(b,sizeof(b),a.price); text(28+(int)strlen(a.name)*18+12,top+8,b,AMBER,3);
     double pct=chart_change_pct(a); snprintf(b,sizeof(b),"%+.2f%%",pct); text_right(340,top+14,b,pct>=0?GREEN:RED,2);
-    int gx=32,gy=top+50,gw=304; char t[80];
+    // Reserve a real left gutter for price labels; chart marks never draw there.
+    int gx=94,gy=top+50,gw=242; char t[80];
     if(a.candle_count){
       // Volume candles: body width represents each candle's volume relative to
       // the highest-volume candle in the visible window. No separate volume bars.
       int price_h=224;
       double candle_lo=0,candle_hi=0,max_volume=0; candle_bounds(a,candle_lo,candle_hi,max_volume);
+      double closes[CANDLE_SAMPLES]={}; BollingerPoint bands[CANDLE_SAMPLES]={};
+      for(int i=0;i<a.candle_count;i++)closes[i]=a.candles[i].close;
+      compute_bollinger_bands(closes,a.candle_count,bands,CANDLE_SAMPLES);
+      // Only sane, nearby BB20 values may expand the natural market range. This
+      // prevents corrupt math/data from flattening candles and also avoids drawing
+      // a clamped line along the chart edge.
+      bool band_visible[CANDLE_SAMPLES]={};
       double lo=candle_lo,hi=candle_hi;
       if(a.price>0&&std::isfinite(a.price)){lo=std::min(lo,a.price);hi=std::max(hi,a.price);}
+      for(int i=0;i<a.candle_count;i++)if(bollinger_point_near_range(bands[i],candle_lo,candle_hi)){
+        band_visible[i]=true; lo=std::min(lo,bands[i].lower); hi=std::max(hi,bands[i].upper);
+      }
       double range=hi-lo;
       if(range<1e-9){double pad=std::max(fabs(hi)*0.0005,1e-6);lo-=pad;hi+=pad;}
       else {double pad=range*0.04;lo-=pad;hi+=pad;}
       // Entry no longer forces the scale; see entry_in_view for the near-range policy.
       bool show_entry=!privacy_mode&&a.pos.open&&entry_in_view(a.pos.entry,lo,hi);
-      for(int i=0;i<=4;i++){int yy=gy+price_h*i/4;draw_line(gx,yy,gx+gw-1,yy,GRID);}
+      for(int i=0;i<=4;i++){int yy=gy+price_h*i/4;draw_line(gx,yy,gx+gw-1,yy,GRID);char axis[16];format_axis_price(axis,sizeof(axis),chart_level_value(lo,hi,i,4));text_right(gx-8,yy-7,axis,AXIS_BLUE,2);}
       auto py=[&](double v){double n=(v-lo)/(hi-lo);n=std::max(0.0,std::min(1.0,n));return gy+price_h-1-(int)lround(n*(price_h-1));};
+      auto px=[&](int i){return gx+((2*i+1)*gw)/(2*a.candle_count);};
+      bool any_band=false;
+      for(int i=1;i<a.candle_count;i++)if(band_visible[i-1]&&band_visible[i]){
+        draw_line(px(i-1),py(bands[i-1].upper),px(i),py(bands[i].upper),BB_UPPER);
+        draw_line(px(i-1),py(bands[i-1].lower),px(i),py(bands[i].lower),BB_LOWER);
+        draw_line(px(i-1),py(bands[i-1].middle),px(i),py(bands[i].middle),BB_MIDDLE);
+        any_band=true;
+      }
+      if(any_band){rect(gx+gw-50,gy+3,50,18,CARD);text_right(gx+gw,gy+4,"BB20",BB_UPPER,2);}
       int entry_y=-1;
       if(show_entry){
         entry_y=py(a.pos.entry);
@@ -360,7 +438,7 @@ static void draw(){
       int max_body_w=std::max(1,std::min(11,slot-1));
       if(!(max_body_w&1))max_body_w--;
       for(int i=0;i<a.candle_count;i++){
-        const Candle&cd=a.candles[i]; int cx=gx+((2*i+1)*gw)/(2*a.candle_count);
+        const Candle&cd=a.candles[i]; int cx=px(i);
         uint16_t color=cd.close>=cd.open?GREEN:RED;
         int yh=py(cd.high),yl=py(cd.low),yo=py(cd.open),yc=py(cd.close);
         draw_line(cx,yh,cx,yl,color);
@@ -380,6 +458,8 @@ static void draw(){
       int yb=gy+price_h+8;
       fmt_money(b,sizeof(b),candle_lo);snprintf(t,sizeof(t),"LO %s",b);text(gx,yb,t,MUTED,2);
       fmt_money(b,sizeof(b),candle_hi);snprintf(t,sizeof(t),"HI %s",b);text_right(gx+gw,yb,t,MUTED,2);
+      // Freed chart footer row: durable daily-pivot levels do not affect scale.
+      draw_key_level_row(a,gx,gx+gw,yb+24);
     } else {
       // Legacy/partial feeds retain the former close-only expanded line chart.
       int gh=188; double lo=0,hi=0; bool hb=history_bounds(a,lo,hi);
@@ -387,7 +467,7 @@ static void draw(){
       if(fabs(hi-lo)<1e-9){double pad=std::max(fabs(hi)*0.0005,1e-6);lo-=pad;hi+=pad;}
       // Same policy as the candle chart: entry never forces the scale.
       bool show_entry=!privacy_mode&&hb&&a.pos.open&&entry_in_view(a.pos.entry,lo,hi);
-      for(int i=0;i<=4;i++){int yy=gy+gh*i/4;draw_line(gx,yy,gx+gw-1,yy,GRID);}
+      for(int i=0;i<=4;i++){int yy=gy+gh*i/4;draw_line(gx,yy,gx+gw-1,yy,GRID);char axis[16];format_axis_price(axis,sizeof(axis),chart_level_value(lo,hi,i,4));text_right(gx-8,yy-7,axis,AXIS_BLUE,2);}
       auto py=[&](double v){double n=(v-lo)/(hi-lo);n=std::max(0.0,std::min(1.0,n));return gy+gh-1-(int)lround(n*(gh-1));};
       if(show_entry){int ey=py(a.pos.entry);for(int X=gx;X<gx+gw;X+=10)draw_line(X,ey,std::min(X+4,gx+gw-1),ey,AMBER);text(gx+2,ey-16,"ENTRY",AMBER,2);}
       if(a.history_count>=2){
@@ -400,6 +480,7 @@ static void draw(){
       fmt_money(b,sizeof(b),lo);snprintf(t,sizeof(t),"LO %s",b);text(gx,yb,t,MUTED,2);
       fmt_money(b,sizeof(b),hi);snprintf(t,sizeof(t),"HI %s",b);text_right(gx+gw,yb,t,MUTED,2);
       history_window(b,sizeof(b),a);text(gx,yb+24,b,MUTED,2);text_right(gx+gw,yb+24,"TAP < >",MUTED,2);
+      draw_key_level_row(a,gx,gx+gw,yb+48);
     }
   } else if(detail){
     // Portfolio summary now lives only on the POSITIONS page.
@@ -472,9 +553,6 @@ static void draw(){
   { const char*bl=selected_chart>=0||detail?"PRICES":"POSITIONS"; rect(16,400,336,36,BLUE); text_center(16,336,410,bl,WHITE,2); }
   flush_frame();
 }
-// Exactly mirrors the blue bottom button: chart -> PRICES, PRICES -> POSITIONS,
-// POSITIONS -> PRICES. Touch and BOOT both call this single action.
-static void activate_bottom_action(){ if(selected_chart>=0){selected_chart=-1;detail=false;} else detail=!detail; }
 static bool toggle_privacy(){
   if(state_mux)xSemaphoreTake(state_mux,portMAX_DELAY);
   privacy_mode=!privacy_mode; bool enabled=privacy_mode;
@@ -488,7 +566,7 @@ static void draw_locked(){ if(state_mux)xSemaphoreTake(state_mux,portMAX_DELAY);
 // working through the FocalTech/CST "reports only on event" behavior, and because
 // it's a separate task, sampling stays alive even while the UI task is mid
 // frame-flush — so taps are no longer dropped. A new press is latched into
-// tap_x/tap_y for the UI loop to consume. Both controllers use the FocalTech
+// One packed tap for the UI loop to consume atomically. Both controllers use the FocalTech
 // register layout: reg 0x02 = [count][xh][xl][yh][yl].
 static void touch_task(void*){
   if(!i2c_bus){ ESP_LOGE(TAG,"touch task: no i2c bus"); vTaskDelete(nullptr); return; }
@@ -503,6 +581,12 @@ static void touch_task(void*){
   ESP_LOGI(TAG,"touch task polling 0x%02x",addr);
   bool down=false;
   while(true){
+    if(xEventGroupGetBits(standby_events)&STANDBY_REQUEST){
+      down=false; xEventGroupSetBits(standby_events,TOUCH_IDLE);
+      while(xEventGroupGetBits(standby_events)&STANDBY_REQUEST)vTaskDelay(pdMS_TO_TICKS(20));
+      xEventGroupClearBits(standby_events,TOUCH_IDLE);
+      continue;
+    }
     bool pressed=false; int x=0,y=0;
 #if BOARD_IS_V1
     bool ready=gpio_get_level(GPIO_NUM_21)==0;   // FT NACKs while idle; INT low = awake
@@ -517,7 +601,7 @@ static void touch_task(void*){
           if(rx>=0&&rx<W&&ry>=0&&ry<H){ x=rx; y=ry; pressed=true; } }
       }
     }
-    if(pressed&&!down){ tap_x=x; tap_y=y; ESP_LOGI(TAG,"tap x=%d y=%d",x,y); }
+    if(pressed&&!down&&touch_input_enabled){ latch_pending_tap(x,y); ESP_LOGI(TAG,"tap x=%d y=%d",x,y); }
     down=pressed;
     vTaskDelay(pdMS_TO_TICKS(10));
   }
@@ -532,7 +616,8 @@ static bool fetch(){
   cJSON*ro=cJSON_GetObjectItem(d,"read_only"); if(!cJSON_IsTrue(ro)){ feed_status=ST_UNSAFE; data_dirty=true; cJSON_Delete(d); return false; }
   if(state_mux)xSemaphoreTake(state_mux,portMAX_DELAY);
   cJSON*prices=cJSON_GetObjectItem(d,"prices"),*price_history=cJSON_GetObjectItem(d,"price_history"),
-       *candles=cJSON_GetObjectItem(d,"candles"),*positions=cJSON_GetObjectItem(d,"positions"),
+       *candles=cJSON_GetObjectItem(d,"candles"),*key_levels=cJSON_GetObjectItem(d,"key_levels"),
+       *positions=cJSON_GetObjectItem(d,"positions"),
        *portfolio=cJSON_GetObjectItem(d,"portfolio");
   balance=num(portfolio,"balance"); total_pnl=num(portfolio,"unrealized_pnl"); realized_pnl_today=num(portfolio,"realized_pnl_today");
   double refresh=num(d,"refresh_seconds"); if(refresh>=1&&refresh<=3600)feed_refresh_seconds=(uint32_t)refresh;
@@ -542,7 +627,7 @@ static bool fetch(){
   candle_interval_seconds=candle_step>=1&&candle_step<=604800?(uint32_t)candle_step:0;
   int candle_total=0;
   for(auto&a:assets){
-    load_candles(a,candles); candle_total+=a.candle_count;
+    load_candles(a,candles); candle_total+=a.candle_count; load_key_levels(a,key_levels);
     bool loaded=load_price_history(a,price_history); double price=num(prices,a.name);
     if(price>0&&std::isfinite(price)){a.price=price;if(!loaded)push_price(a,price);}
     a.pos=Position{}; cJSON*p=cJSON_GetObjectItem(positions,a.name);
@@ -579,8 +664,7 @@ static i2c_master_bus_handle_t ensure_i2c_bus(){
 // asserted before the first panel command; doing this after panel_init is too late.
 // V1 additionally requires the AXP2101 rail setup at 0x34 (the proven ClawBuddy
 // sequence); V2 must NEVER receive those rail writes — they blank the CO5300 panel
-// while every driver init still logs success. V2 keeps its existing PMIC long-hold
-// shutdown configuration; only the separately proven IRQ/status writes occur later.
+// while every driver init still logs success. V2 performs read-only PMU diagnostics.
 static void panel_power_reset(){
   ensure_i2c_bus();
   ESP_ERROR_CHECK(esp_io_expander_new_i2c_tca9554(i2c_bus,ESP_IO_EXPANDER_I2C_TCA9554_ADDRESS_000,&io_expander));
@@ -715,7 +799,7 @@ static void init_rest(){
   axp_dump("touch"); ESP_LOGI(TAG,"PHASE7: touch %s",touch?"ready":"absent"); vTaskDelay(pdMS_TO_TICKS(PHASE_DELAY_MS));
   gpio_config_t gb={.pin_bit_mask=1ULL<<GPIO_NUM_0,.mode=GPIO_MODE_INPUT,.pull_up_en=GPIO_PULLUP_ENABLE,.pull_down_en=GPIO_PULLDOWN_DISABLE,.intr_type=GPIO_INTR_DISABLE}; gpio_config(&gb);
   update_battery();   // seed the power indicator before the first UI frame
-  axp_pkey_setup();   // POWER short press; PMIC long hold remains full hardware shutdown
+  axp_pkey_setup();   // safe 0x41/0x49 accesses only; never a V2 rail write
 }
 // Network fetch runs on its own task so the blocking HTTP round trip never stalls
 // touch sampling or rendering in the UI loop. It writes shared feed state under
@@ -723,12 +807,98 @@ static void init_rest(){
 static void fetch_task(void*){
   uint64_t last=0;
   while(true){
+    if(xEventGroupGetBits(standby_events)&STANDBY_REQUEST){
+      xEventGroupSetBits(standby_events,FEED_IDLE);
+      while(xEventGroupGetBits(standby_events)&STANDBY_REQUEST)vTaskDelay(pdMS_TO_TICKS(20));
+      xEventGroupClearBits(standby_events,FEED_IDLE);
+      last=0;
+      continue;
+    }
     uint64_t now=esp_timer_get_time()/1000;
     bool portal=NetworkPortal::GetInstance().IsPortalActive();
     uint32_t interval_ms=feed_refresh_seconds?feed_refresh_seconds*1000u:REFRESH_MS;
-    if(!portal&&(force_fetch||last==0||now-last>=interval_ms)){ force_fetch=false; last=now; fetch(); }
+    if(!portal&&wifi_up.load(std::memory_order_acquire)){
+      bool requested=force_fetch.exchange(false,std::memory_order_acq_rel);
+      if(requested||last==0||now-last>=interval_ms){ last=now; fetch(); }
+    }
     vTaskDelay(pdMS_TO_TICKS(100));
   }
+}
+
+enum class FullStandbyResult { kAwake, kDisplayOnly, kDeferred, kFailed };
+
+// Full battery standby. The exclusive operation gate prevents Wi-Fi shutdown
+// while either OTA writer owns the inactive partition. Live VBUS is rechecked
+// before Wi-Fi stops and after every light-sleep slice, so inserting USB moves
+// to display-only standby without lighting the panel.
+static FullStandbyResult enter_full_standby(NetworkPortal& network){
+  const bool started_awake=screen_on;
+  RuntimeOperationLease operation(runtime_operation_gate(),RuntimeOperation::kFullStandby);
+  if(!operation.Acquired()){
+    ESP_LOGW(TAG,"full standby deferred: %s active",runtime_operation_name(runtime_operation_gate().Current()));
+    return FullStandbyResult::kDeferred;
+  }
+  touch_input_enabled=false;
+  clear_pending_tap();
+  set_screen(false);
+  xEventGroupClearBits(standby_events,FEED_IDLE|TOUCH_IDLE);
+  xEventGroupSetBits(standby_events,STANDBY_REQUEST);
+  EventBits_t idle=0;
+  uint64_t pause_deadline=esp_timer_get_time()/1000+20000;
+  while((idle&(FEED_IDLE|TOUCH_IDLE))!=(FEED_IDLE|TOUCH_IDLE)){
+    idle=xEventGroupWaitBits(standby_events,FEED_IDLE|TOUCH_IDLE,pdFALSE,pdTRUE,pdMS_TO_TICKS(100));
+    if(refresh_vbus_present()){
+      ESP_LOGI(TAG,"USB appeared while pausing workers; continuing as display-only standby");
+      force_fetch=true; data_dirty=true;
+      xEventGroupClearBits(standby_events,STANDBY_REQUEST);
+      return FullStandbyResult::kDisplayOnly;
+    }
+    if(esp_timer_get_time()/1000>=pause_deadline)break;
+  }
+  if((idle&(FEED_IDLE|TOUCH_IDLE))!=(FEED_IDLE|TOUCH_IDLE)){
+    ESP_LOGE(TAG,"standby aborted: worker pause timeout bits=0x%lx",(unsigned long)idle);
+    xEventGroupClearBits(standby_events,STANDBY_REQUEST);
+    if(started_awake){set_screen(true);touch_input_enabled=true;draw_locked();}
+    return FullStandbyResult::kFailed;
+  }
+  if(refresh_vbus_present()){
+    ESP_LOGI(TAG,"USB appeared before Wi-Fi suspend; continuing as display-only standby");
+    force_fetch=true; data_dirty=true;
+    xEventGroupClearBits(standby_events,STANDBY_REQUEST);
+    return FullStandbyResult::kDisplayOnly;
+  }
+  network.Suspend();
+  if(refresh_vbus_present()){
+    ESP_LOGI(TAG,"USB appeared during Wi-Fi suspend; resuming into display-only standby");
+    network.Resume();
+    force_fetch=true; data_dirty=true;
+    xEventGroupClearBits(standby_events,STANDBY_REQUEST);
+    return FullStandbyResult::kDisplayOnly;
+  }
+  ESP_LOGI(TAG,"battery standby entered by POWER: panel off, feed/touch paused, Wi-Fi stopped; polling AXP 0x49 via 250ms light-sleep slices");
+  bool power_wake=false,usb_transition=false;
+  while(!power_wake&&!usb_transition){
+    ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(kPowerPollSliceUs));
+    esp_err_t sleep_err=esp_light_sleep_start();
+    if(sleep_err!=ESP_OK)ESP_LOGW(TAG,"standby light-sleep slice failed: %s",esp_err_to_name(sleep_err));
+    power_wake=axp_pkey_short(); // consumes INTSTS2 bit3 W1C
+    if(!power_wake)usb_transition=refresh_vbus_present();
+  }
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+  network.Resume();
+  force_fetch=true;
+  data_dirty=true;
+  xEventGroupClearBits(standby_events,STANDBY_REQUEST);
+  clear_pending_tap();
+  if(power_wake){
+    ESP_LOGI(TAG,"battery standby wake by POWER: event consumed");
+    set_screen(true);
+    draw_locked();
+    touch_input_enabled=true;
+    return FullStandbyResult::kAwake;
+  }
+  ESP_LOGI(TAG,"USB inserted during battery standby: network/tasks resumed, panel remains off");
+  return FullStandbyResult::kDisplayOnly;
 }
 extern "C" void app_main(){
   ESP_LOGI(TAG,"board variant: %s",BOARD_IS_V1?"V1 (SH8601/FT5x06/AXP2101)":"V2 (CO5300/CST820)");
@@ -741,12 +911,30 @@ extern "C" void app_main(){
   ESP_LOGI(TAG,"PHASE8: ota image confirmed"); draw(); ESP_LOGI(TAG,"PHASE9: first UI frame drawn");
   auto& network=NetworkPortal::GetInstance();
   network.Initialize([](bool connected){wifi_up=connected;if(connected)force_fetch=true;},[](){});
+  setenv("TZ","EST5EDT,M3.2.0/2,M11.1.0/2",1); tzset();
+  esp_sntp_config_t sntp=ESP_NETIF_SNTP_DEFAULT_CONFIG("time.cloudflare.com");
+  sntp.wait_for_sync=false;
+  esp_err_t sntp_err=esp_netif_sntp_init(&sntp);
+  if(sntp_err!=ESP_OK)ESP_LOGW(TAG,"SNTP init failed: %s",esp_err_to_name(sntp_err));
   vTaskDelay(pdMS_TO_TICKS(3000)); axp_dump("wifi+3s"); ESP_LOGI(TAG,"PHASE10: wifi/portal up");
   state_mux=xSemaphoreCreateMutex();
+  standby_events=xEventGroupCreate();
+  if(!state_mux||!standby_events)abort();
   xTaskCreate(fetch_task,"feed",12288,nullptr,4,nullptr);
   xTaskCreate(touch_task,"touch",3072,nullptr,6,nullptr);
-  uint64_t last_draw=0,button_at=0,last_batt=0,last_pkey=0;
-  bool button_down=false,ota_hold_handled=false,shown_portal=false,shown_armed=false;
+  xTaskCreate(auto_ota_task,"auto_ota",10240,nullptr,3,nullptr);
+  ESP_LOGI(TAG,"controls: POWER short=standby/wake; BOOT short=blue bottom action; BOOT 0.8-<10s release=privacy; BOOT continuous 10s=OTA");
+  uint64_t last_draw=0,button_at=0,last_batt=0,last_pkey=0,last_vbus_mode_check=0;
+  bool button_down=false,ota_hold_handled=false,shown_portal=false,shown_armed=false,usb_display_only=false;
+  auto reset_boot_after_blocking_standby=[&](uint64_t timestamp){
+    bool boot_is_down=gpio_get_level(GPIO_NUM_0)==0;
+    BootGestureReset reset=boot_gesture_after_blocking_standby(boot_is_down,timestamp);
+    button_down=reset.button_down;
+    button_at=reset.button_at_ms;
+    // If BOOT is held across POWER wake, suppress that gesture through release.
+    // The next fresh press clears ota_hold_handled and starts a new timer.
+    ota_hold_handled=reset.suppress_release;
+  };
   // Tight UI loop: sample touch every ~20ms, redraw only when something changed
   // (new feed data, a tap, battery, or the periodic stale-check heartbeat). With
   // the network fetch on its own task, the only blocking work here is a ~25ms
@@ -756,27 +944,87 @@ extern "C" void app_main(){
     bool need_draw=false;
     bool portal=network.IsPortalActive(),armed=network.IsOtaArmed();
     if(portal!=shown_portal||armed!=shown_armed){shown_portal=portal;shown_armed=armed;need_draw=true;}
-    if(data_dirty){data_dirty=false;need_draw=true;}
-    // Poll even with the display off: AXP IRQ status is the wake path.
-    if(now-last_pkey>=100){last_pkey=now;if(axp_pkey_short()){set_screen(!screen_on);if(screen_on)need_draw=true;}}
-    int tx=tap_x,ty=tap_y;
-    if(tx>=0){
-      tap_x=-1; tap_y=-1;   // consume the latched press (ignored while the screen is off)
+    if(data_dirty.exchange(false,std::memory_order_acq_rel))need_draw=true;
+    if(now-last_pkey>=100){
+      last_pkey=now;
+      if(axp_pkey_short()){
+        if(!screen_on){
+          ESP_LOGI(TAG,"POWER short: waking display-only standby");
+          usb_display_only=false;
+          set_screen(true);
+          draw_locked();
+          clear_pending_tap();
+          touch_input_enabled=true;
+        } else {
+          // Refresh VBUS at the button event instead of relying on the up-to-one-
+          // second-old top-bar sample. Battery presence never overrides VBUS.
+          update_battery();
+          PowerStandbyMode mode=power_standby_mode(g_batt.vbus,g_batt.present);
+          if(mode==PowerStandbyMode::kDisplayOnly){
+            ESP_LOGI(TAG,"POWER short: entering USB display-only standby; Wi-Fi/feed/tasks remain active");
+            touch_input_enabled=false;
+            clear_pending_tap();
+            set_screen(false);
+            usb_display_only=true;
+          } else {
+            ESP_LOGI(TAG,"POWER short: entering full battery standby");
+            enter_full_standby(network);
+            now=esp_timer_get_time()/1000;
+            reset_boot_after_blocking_standby(now);
+            usb_display_only=!screen_on;
+          }
+        }
+        now=esp_timer_get_time()/1000; last_draw=now; last_batt=now; last_pkey=now;
+        need_draw=false;
+      }
+    }
+    if(!screen_on&&usb_display_only&&now-last_vbus_mode_check>=1000){
+      last_vbus_mode_check=now;
+      if(!refresh_vbus_present()){
+        ESP_LOGI(TAG,"USB removed during display-only standby: requesting full battery standby");
+        enter_full_standby(network);
+        usb_display_only=!screen_on;
+        now=esp_timer_get_time()/1000;
+        reset_boot_after_blocking_standby(now);
+        last_draw=now; last_batt=now; last_pkey=now; last_vbus_mode_check=now;
+        need_draw=false;
+      }
+    }
+    uint32_t packed_tap=pending_tap.exchange(NO_PENDING_TAP,std::memory_order_acq_rel);
+    if(packed_tap!=NO_PENDING_TAP){
+      int tx=static_cast<int>((packed_tap>>16)&0xffffu);
+      int ty=static_cast<int>(packed_tap&0xffffu);
       if(!portal&&screen_on){
-        if(ty>=390){ activate_bottom_action(); need_draw=true; }
+        if(ty>=390){ activate_bottom_action(selected_chart,detail); need_draw=true; }
         else if(selected_chart>=0&&ty>=54&&ty<390){ selected_chart=(selected_chart+(tx<W/2?4:1))%5; need_draw=true; }
         else if(!detail&&ty>=54&&ty<390){ for(int k=0;k<px_row_n;k++) if(ty>=px_row_y[k]&&ty<px_row_y[k]+px_row_h[k]){ selected_chart=px_row_asset[k]; need_draw=true; break; } }
       }
     }
     bool bb=gpio_get_level(GPIO_NUM_0)==0;
-    if(bb&&!button_down){button_at=now;ota_hold_handled=false;}
-    if(bb&&!ota_hold_handled&&now-button_at>=10000){network.ArmOta();ota_hold_handled=true;need_draw=true;}
-    if(!bb&&button_down&&!ota_hold_handled){
-      uint64_t held=now-button_at;
-      if(held>=800){ bool enabled=toggle_privacy(); need_draw=screen_on; ESP_LOGI(TAG,"privacy %s",enabled?"ON":"OFF"); }
-      else if(!portal&&screen_on){ activate_bottom_action(); need_draw=true; }
+    if(!screen_on){
+      // BOOT has no hidden effect while the panel is off. Continuously resetting
+      // the hold origin also prevents off-screen hold time from carrying into a
+      // later POWER wake.
+      button_at=now; ota_hold_handled=false; button_down=bb;
+    } else {
+      if(bb&&!button_down){button_at=now;ota_hold_handled=false;}
+      if(boot_should_arm_ota(bb,now-button_at,ota_hold_handled)){network.ArmOta();ota_hold_handled=true;need_draw=true;}
+      if(!bb&&button_down&&!ota_hold_handled){
+        uint64_t held=now-button_at;
+        BootReleaseAction action=boot_release_action(held,false);
+        if(action==BootReleaseAction::kArmOta){
+          network.ArmOta(); ota_hold_handled=true; need_draw=true;
+          ESP_LOGI(TAG,"BOOT 10s release edge: OTA arm requested");
+        } else if(action==BootReleaseAction::kTogglePrivacy){
+          bool enabled=toggle_privacy(); need_draw=true;
+          ESP_LOGI(TAG,"BOOT long release: privacy %s",enabled?"ON":"OFF");
+        } else if(action==BootReleaseAction::kBottomAction&&!portal){
+          activate_bottom_action(selected_chart,detail); need_draw=true;
+          ESP_LOGI(TAG,"BOOT short: blue bottom action");
+        }
+      }
+      button_down=bb;
     }
-    button_down=bb;
     if(now-last_batt>=1000){update_battery();last_batt=now;need_draw=true;}
     if(now-last_draw>=1000)need_draw=true;   // heartbeat so STALE/OFFLINE can appear without new data
     if(need_draw&&screen_on){draw_locked();last_draw=now;}   // never flush while the screen is off

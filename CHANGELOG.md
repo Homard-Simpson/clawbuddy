@@ -1,5 +1,47 @@
 # myAI Changelog
 
+## 2026-08-03 — Coinbase AMOLED USB-aware standby
+- Split Power/PWRKEY short-press policy by live VBUS state: battery operation retains full Wi-Fi/feed/touch-paused light-sleep standby, while USB power uses display-only standby with touch ignored and networking/background work left active. VBUS wins whether the battery is charging, full, or absent, and insertion/removal while the panel is off transitions modes automatically without lighting the screen.
+- Added one exclusive runtime gate for manual OTA, automatic OTA, and full standby so OTA writers cannot overlap and Wi-Fi cannot be stopped under an active firmware update. Full standby is deferred until the update finishes.
+- Serialized captive-portal lifecycle/auth state across Wi-Fi, timer, UI, and HTTP tasks; accumulated fragmented manual-OTA headers; bounded untrusted descriptor strings before suffix checks; constrained build versions to ESP-IDF's descriptor/uint32 limits; restored the Wi-Fi fallback timer after resume; narrowed runtime AXP writes; and covered the arbitration/edge policies with host tests.
+- Kept Power as the only standby/wake control and preserved BOOT exactly while the panel is on: short executes the blue bottom action, release after 0.8 to under 10 seconds toggles privacy, and an uninterrupted 10-second hold arms OTA without a release action. BOOT is ignored while the panel is off.
+- Moved the battery and clock eight pixels inward to symmetric 24-pixel top-bar anchors and added host coverage for source-policy selection and safe-area positioning.
+
+## 2026-08-01 — Coinbase AMOLED screen-off standby
+- Corrected controls to the authoritative mapping: Power/PWRKEY short exclusively enters/wakes standby; BOOT short calls the same blue-button action; BOOT 0.8-to-under-10-second release toggles privacy; continuous BOOT 10 seconds arms OTA without a release action.
+- Preserved feed/touch pause acknowledgements, panel-off, Wi-Fi stop/resume, immediate refetch/redraw, and light-sleep power savings. Cross-variant wake now uses 250 ms timer slices to poll/consume only AXP INTSTS2 bit 3 because no safe AXP IRQ GPIO mapping is established.
+- Restricted runtime PMU writes to proven IRQ registers `0x41`/`0x49`; V2 receives no rail-register writes. Added host coverage for controls, transitions, polling interval, and register allowlisting.
+- Raised the ESP-IDF main-task stack from 3584 to 8192 bytes after serial validation exposed a V1 overflow on the first full chart/feed redraw; final V1/V2 serial runs remained stable through repeated HTTP 200 redraws.
+
+## 2026-08-01 — Coinbase AMOLED daily-pivot key levels
+- Added bounded, backward-compatible support/resistance arrays to the read-only device feed, derived from clustered 180-day daily pivot highs/lows and refreshed every six hours with stale-safe retention.
+- Reused the expanded chart's freed footer row for nearest support and resistance, with adaptive precision and no effect on candle scaling.
+- Added feed-model and firmware host tests; retained the no-orders/no-write safety boundary.
+
+## 2026-07-22 — Coinbase AMOLED positions and daily realized P/L
+
+- Fixed Coinbase CDE contract-root mapping so authenticated BTC/SOL/XLM/HYPE/ETH open positions reach the AMOLED rows.
+- Added Coinbase daily realized P/L and same-day closed-position detail using the America/New_York trading date.
+- Kept the feed read-only and protected by the existing bearer token plus allowlisted device ID.
+- Updated the dedicated AMOLED layout to show all open positions and recent positions closed today without changing touch controls.
+
+## 2026-05-20 — Waveshare 1.85 round LCD two-image rotation
+
+- Updated the dedicated Waveshare ESP32-S3-LCD-1.85 image-viewer firmware to embed two supplied images.
+- Baked each asset with horizontal mirroring, top-right anchored cover crop after mirroring, and 180 degree rotation.
+- Changed the firmware to alternate the embedded images every 30 seconds indefinitely after every power-up.
+- Disabled panel-level mirroring because the requested transforms are now baked into the assets.
+
+## 2026-05-20 — Waveshare 1.85 round LCD mirrored image
+
+- Enabled horizontal panel mirroring in the dedicated Waveshare ESP32-S3-LCD-1.85 image-viewer firmware so the embedded full-screen image appears mirrored on the display.
+
+## 2026-05-20 — Waveshare 1.85 round LCD image viewer
+
+- Added dedicated ESP-IDF firmware under `firmware/waveshare-esp32-s3-lcd-1.85-image-viewer/` for the non-touch Waveshare ESP32-S3-LCD-1.85 round display.
+- Embedded the supplied image as a center-cropped 360x360 RGB565 asset and draw it full-screen on boot.
+- Flashed the viewer to the connected ESP32-S3 on `/dev/cu.usbmodem21101`; boot logs reached `image_viewer: Image displayed`.
+
 ## 2026-05-02 — long assistant turn OTA 0.1.17
 
 - Bumped firmware to `0.1.17-myai`.
